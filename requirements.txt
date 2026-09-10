@@ -1,0 +1,9 @@
+torch
+transformers
+accelerate
+peft
+bitsandbytes; platform_system == "Linux"
+datasets
+PyYAML
+soundfile
+pytest

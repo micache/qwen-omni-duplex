@@ -1,0 +1,24 @@
+model:
+  name: Qwen/Qwen2.5-Omni-3B
+  component: thinker
+
+timeline:
+  chunk_seconds: 2.0
+  frame_rate_hz: 25
+  control_events: [IDLE, START, STOP]
+
+task:
+  fusion: additive_audio_text_control
+  objective: weighted_next_event
+  output: text_only
+
+data:
+  dataset: DailyTalkContiguous
+  synthetic_interruption: true
+
+training:
+  method: lora
+  batch_size: 1
+  gradient_accumulation_steps: 16
+  learning_rate: 2.0e-4
+  seed: 17
