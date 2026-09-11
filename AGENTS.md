@@ -2,8 +2,14 @@
 
 This is a compact personal research reproduction, not a production package.
 Keep changes small, explicit, and tied to the session plan. Do not download
-models or datasets unless a later session explicitly asks for it. Never commit
-or push on the user's behalf.
+models or datasets unless a later session explicitly asks for it.
+
+## Version control
+
+The user has explicitly authorized staging, committing, and pushing each
+completed repository change to
+`git@github.com:micache/qwen-omni-duplex.git`. Report authentication or remote
+history blockers instead of rewriting history or exposing private credentials.
 
 ## Non-negotiable scope
 
@@ -25,6 +31,11 @@ services, or Huawei-confidential material.
 
 ## Repository conventions
 
+- Use the repository-local Python 3.11 environment for every Python command.
+  Invoke `.venv/bin/python` and `.venv/bin/python -m pytest` explicitly; do not
+  fall back to a system Python or mix interpreters between checks. If `.venv`
+  is missing or incomplete, report that environment blocker before running
+  Python code.
 - Use `requirements.txt` and plain YAML files.
 - Do not add a `pyproject.toml`, Docker setup, web server, CI workflow, Hydra,
   or a generic registry.

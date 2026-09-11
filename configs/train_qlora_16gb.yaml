@@ -1,5 +1,6 @@
 model:
   name: Qwen/Qwen2.5-Omni-3B
+  revision: f75b40e3da2003cdd6e1829b1f420ca70797c34e
   component: thinker
   load_in_4bit: true
 

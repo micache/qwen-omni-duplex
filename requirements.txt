@@ -1,9 +1,17 @@
-torch
-transformers
-accelerate
-peft
-bitsandbytes; platform_system == "Linux"
-datasets
-PyYAML
-soundfile
-pytest
+--extra-index-url https://download.pytorch.org/whl/cu126
+
+# Session 06 probe: Qwen/Qwen2.5-Omni-3B at
+# f75b40e3da2003cdd6e1829b1f420ca70797c34e.
+torch==2.10.0+cu126
+torchvision==0.25.0+cu126
+transformers==5.17.0
+accelerate==1.15.0
+peft==0.20.0
+bitsandbytes==0.50.2; platform_system == "Linux"
+datasets==5.0.1
+huggingface_hub==1.31.0
+Pillow==12.3.0
+PyYAML==6.0.3
+soundfile==0.14.0
+scipy==1.17.1
+pytest==9.1.1
