@@ -78,3 +78,48 @@ Reproduction command:
 The complete machine-readable result, including raw loading keys, shapes,
 source hashes, environment commands, and per-stage memory snapshots, is
 `notes/session06_probe.json`.
+
+## Session 07 — full-duplex Thinker wrapper
+
+`duplex/model.py` now wraps the direct Session 06 Thinker without constructing
+or using a Talker. The wrapper reads `seconds_per_chunk=2` and
+`position_id_per_seconds=25` from the root checkpoint's `thinker_config`, and
+reads IDLE/START/STOP as 151859/151860/151861 from `talker_config` before
+validating them against the 151,936-entry Thinker vocabulary. The root config
+is required because those control IDs are not present on the directly loaded
+Thinker sub-config.
+
+Audio follows only the interface accepted in Session 06. The wrapper checks the
+extractor mask against the collator's pre-convolution lengths, calls the audio
+tower's `_get_feat_extract_output_lengths`, requires those per-item output
+lengths to match the enabled timeline positions, calls
+`thinker.get_audio_features`, and splits its flattened dimension zero by the
+model-derived lengths. Restored samples are padded only at the end. Any
+unexplained flattened, per-item, hidden-width, or mask length fails before
+fusion.
+
+Text and control IDs both use the original Thinker embedding table and are
+zeroed by their independent masks. Their tensors are added directly to the
+aligned audio tensor in the shared hidden space, then passed to the original
+`thinker.model` and `thinker.lm_head`. No projection, gate, classifier,
+controller, or token was added. The wrapper returns the full final text-model
+hidden sequence as `lexical_hidden_states` for a possible future Talker while
+implementing no Talker behavior.
+
+The installed Thinker LM head is a position-wise `torch.nn.Linear`. Therefore
+the opt-in inference-only last-position path slices the final hidden sequence
+before that head, which is equivalent to slicing full logits and avoids the
+full vocabulary allocation. The optimization is refused if the loaded head is
+not a `Linear`, and it cannot be selected when labels are present. Two-dimensional
+`position_ids`, `past_key_values`, a full cached attention mask, and `use_cache`
+are forwarded unchanged to the text model.
+
+The opt-in pinned-checkpoint tests use the direct Thinker load, BF16, SDPA, and
+the same full Qwen processor audio shape path as Session 06. They are skipped
+unless `RUN_QWEN_GPU_TESTS=1`, and all checkpoint reads specify
+`local_files_only=True`. The Session 07 explicit smoke command could not pass
+CUDA preflight in the current execution context: torch 2.10.0+cu126 reported
+zero devices, CUDA initialization reported no accessible NVIDIA driver, and
+NVML reported that GPU access was blocked by the operating system. No model was
+loaded during that failed smoke invocation, so no new parity, real-audio,
+batch-two, or peak-VRAM result is claimed.

@@ -381,3 +381,62 @@ evidence is in `notes/session06_probe.json`; the concise interpretation is in
 
 Stop boundary: Session 06 ends here. No model wrapper, LoRA/QLoRA integration,
 training, generation, dataset download, or benchmark work was started.
+
+## Session 07 — Qwen full-duplex Thinker wrapper
+
+Status: implementation and CPU validation complete; the requested GPU smoke is
+blocked at CUDA visibility preflight in the current execution context. No
+training or long-running job was started.
+
+Implemented:
+
+- A Qwen-specific wrapper around the direct `Qwen2.5-Omni-3B` Thinker selected
+  in Session 06. Checkpoint-derived two-second/25 Hz constants and the three
+  Talker-config text control IDs are validated at construction.
+- Audio extraction through the existing Thinker `get_audio_features` and audio
+  tower length helper, including mask/pre-convolution checks, flattened
+  batch-output splitting by model-derived per-sample lengths, trailing padding,
+  hidden-width validation, and explicit failure for unexplained lengths.
+- Exact additive fusion of independently zero-masked text and control embeddings
+  from the original shared token table with aligned audio embeddings. The fused
+  sequence uses the original Thinker text model and LM head; no projection,
+  gate, classifier, controller, or new token was introduced.
+- Optional labels and inference output, full lexical final hidden states,
+  `past_key_values`, `use_cache`, and two-dimensional `position_ids` forwarding.
+  Inference can request last-position-only logits when the loaded Qwen head is
+  the installed position-wise `Linear`; training labels deliberately reject
+  that reduced-logit path.
+- Direct, unshifted cross-entropy over the labels already causally shifted by
+  `timeline.py`. Per-position losses are weighted by text/idle/start/stop group,
+  ignored padding contributes no weight, and the result is normalized by the
+  sum of applied weights. Outputs include per-group mean losses, target counts,
+  prediction counts over supervised positions, and the applied weight sum.
+- Tiny CPU mocks and focused tests covering exact fusion/masking, restoration of
+  unequal flattened batch segments, manual weighted-loss equality, all-padding
+  behavior, group accounting, cache forwarding, inference-only logits, config
+  validation, and unexplained-length failures.
+- Four opt-in GPU integration tests for text-only base-Thinker parity, one real
+  two-second audio forward, batch two, and no-grad peak CUDA memory. Normal
+  pytest skips these tests, and their explicit path reads only the pinned local
+  checkpoint snapshot.
+
+Validation commands run:
+
+```bash
+.venv/bin/python -m pytest -q
+.venv/bin/python -m compileall -q duplex tests
+git diff --check
+RUN_QWEN_GPU_TESTS=1 .venv/bin/python -m pytest -q tests/test_model_gpu.py -s
+```
+
+The CPU suite passed with 61 tests and four expected opt-in GPU skips.
+Compilation and whitespace checks passed. The explicit GPU command exited at
+fixture preflight before loading the checkpoint because torch reported
+`cuda_available=False` and zero devices; CUDA initialization reported no
+accessible NVIDIA driver, while `nvidia-smi`/NVML reported that GPU access was
+blocked by the operating system. This is an execution-environment blocker, not
+a model-forward failure, and no GPU integration or peak-memory result is
+recorded for Session 07.
+
+Stop boundary: Session 07 ends here. No trainer, Talker, generation path, model
+or dataset download, or long job was added or run.
