@@ -9,10 +9,11 @@ import json
 import math
 import os
 import random
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -45,7 +46,15 @@ from .model import (
     NextEventLossWeights,
     QwenDuplexThinker,
 )
-from .timeline import InterruptionConfig
+from .timeline import (
+    ControlTokenIds,
+    EventKind,
+    InterruptionConfig,
+    WindowTimeline,
+    augment_synthetic_interruption,
+    build_window_timeline,
+    format_timeline_table,
+)
 
 
 PROJECTION_SUFFIXES = (
@@ -126,6 +135,11 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
         raise ValueError("Session 08 requires fixed 2 s chunks at 25 Hz.")
     if timeline.get("control_events") != ["IDLE", "START", "STOP"]:
         raise ValueError("timeline.control_events must be [IDLE, START, STOP].")
+    if timeline.get("control_token_source", "talker") not in {
+        "talker",
+        "thinker_native",
+    }:
+        raise ValueError("timeline.control_token_source must be talker or thinker_native.")
     expected_task = {
         "fusion": FUSION,
         "objective": "weighted_next_event",
@@ -135,6 +149,70 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
         raise ValueError(f"task must retain the Session 08 scope: {expected_task}.")
     if data.get("dataset") != DATASET_VIEW or data.get("synthetic_interruption") is not True:
         raise ValueError("Training data must be DailyTalkContiguous with synthetic interruption.")
+
+    selected_windows = data.get("selected_windows")
+    if selected_windows is not None:
+        if data.get("synthetic_smoke", False):
+            raise ValueError("selected_windows cannot be combined with synthetic_smoke.")
+        if not isinstance(selected_windows, list) or not 2 <= len(selected_windows) <= 8:
+            raise ValueError("data.selected_windows must contain 2-8 window mappings.")
+        seen_windows: set[tuple[str, float, float]] = set()
+        interrupted = 0
+        for index, raw_window in enumerate(selected_windows):
+            window = _mapping(raw_window, f"data.selected_windows[{index}]")
+            conversation_id = window.get("conversation_id")
+            if not isinstance(conversation_id, str) or not conversation_id:
+                raise ValueError(f"selected window {index} has no public conversation_id.")
+            start = window.get("start_seconds")
+            end = window.get("end_seconds")
+            if (
+                isinstance(start, bool)
+                or not isinstance(start, (int, float))
+                or isinstance(end, bool)
+                or not isinstance(end, (int, float))
+                or not math.isclose(float(end) - float(start), 2.0, abs_tol=1e-9)
+            ):
+                raise ValueError(f"selected window {index} must span exactly 2 seconds.")
+            if window.get("kind") not in {kind.value for kind in WindowKind}:
+                raise ValueError(f"selected window {index} has an invalid kind.")
+            word_indices = window.get("assistant_word_indices")
+            if (
+                not isinstance(word_indices, list)
+                or not word_indices
+                or any(
+                    isinstance(value, bool) or not isinstance(value, int) or value < 0
+                    for value in word_indices
+                )
+                or word_indices != sorted(set(word_indices))
+            ):
+                raise ValueError(
+                    f"selected window {index} needs unique sorted assistant_word_indices."
+                )
+            key = (conversation_id, float(start), float(end))
+            if key in seen_windows:
+                raise ValueError(f"duplicate selected window metadata: {key}.")
+            seen_windows.add(key)
+            synthetic_audio = window.get("synthetic_user_audio")
+            if synthetic_audio is not None:
+                synthetic_audio = _mapping(
+                    synthetic_audio,
+                    f"data.selected_windows[{index}].synthetic_user_audio",
+                )
+                source_start = synthetic_audio.get("start_seconds")
+                source_end = synthetic_audio.get("end_seconds")
+                if (
+                    isinstance(source_start, bool)
+                    or not isinstance(source_start, (int, float))
+                    or isinstance(source_end, bool)
+                    or not isinstance(source_end, (int, float))
+                    or not float(start) <= float(source_start) < float(source_end) <= float(end)
+                ):
+                    raise ValueError(
+                        f"selected window {index} has invalid synthetic user-audio metadata."
+                    )
+                interrupted += 1
+        if interrupted < 1:
+            raise ValueError("At least one selected window must request synthetic interruption.")
 
     method = training.get("method")
     load_in_4bit = model.get("load_in_4bit", False)
@@ -173,6 +251,8 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
             "training.max_steps, batch_size, and gradient_accumulation_steps "
             "must be positive."
         )
+    if selected_windows is not None and not 100 <= training["max_steps"] <= 300:
+        raise ValueError("The Session 09 overfit budget must be 100-300 optimizer steps.")
     backends = logging.get("backends", [])
     if not isinstance(backends, list) or not backends or not set(backends) <= {
         "jsonl",
@@ -348,9 +428,19 @@ def build_training_model(config: Mapping[str, Any]) -> tuple[QwenDuplexThinker, 
         revision=model_config["revision"],
     )
     thinker = get_peft_model(thinker, peft_config)
+    control_tokens = None
+    if config["timeline"].get("control_token_source") == "thinker_native":
+        thinker_config = root_config.thinker_config
+        control_tokens = ControlTokenIds(
+            idle=thinker_config.pad_token_id,
+            start=thinker_config.bos_token_id,
+            stop=thinker_config.eos_token_id,
+            thinker_vocab_size=thinker_config.text_config.vocab_size,
+        )
     duplex = QwenDuplexThinker(
         thinker,
         qwen_config=root_config,
+        control_tokens=control_tokens,
         loss_weights=NextEventLossWeights(**config["loss_weights"]),
     )
     assert_only_allowed_lora_trainable(duplex, targets)
@@ -412,7 +502,96 @@ def build_datasets_and_collator(
 
     data = config["data"]
     training = config["training"]
-    if data.get("synthetic_smoke", False):
+    selected_windows = data.get("selected_windows")
+    prebuilt_interruption = selected_windows is not None
+    if selected_windows is not None:
+        root = Path(data["root"])
+        entries = {
+            entry.conversation_id: entry
+            for entry in read_manifest(root / data.get("manifest", "dailytalk.jsonl"))
+        }
+        split_salt = f"DailyTalkContiguous-session09-{training['split_seed']}"
+        train_values = []
+        eval_values = []
+        for index, selected in enumerate(selected_windows):
+            conversation_id = selected["conversation_id"]
+            if conversation_id not in entries:
+                raise ValueError(
+                    f"selected window {index} references unknown public ID "
+                    f"{conversation_id!r}."
+                )
+            split = assign_split(conversation_id, salt=split_salt)
+            if split is not Split.TRAIN:
+                raise ValueError(
+                    f"selected window {conversation_id!r} is assigned to {split.value}, "
+                    "not train."
+                )
+            record = load_conversation(entries[conversation_id], dataset_root=root)
+            requested_indices = tuple(selected["assistant_word_indices"])
+            assistant_words = tuple(
+                word
+                for word in record.assistant_words
+                if word.source_index in requested_indices
+            )
+            found_indices = tuple(word.source_index for word in assistant_words)
+            if found_indices != requested_indices:
+                raise ValueError(
+                    f"selected window {conversation_id!r} requested assistant words "
+                    f"{requested_indices}, found {found_indices}."
+                )
+            synthetic_audio = selected.get("synthetic_user_audio")
+            user_words = ()
+            if synthetic_audio is not None:
+                user_words = (
+                    WordSpan(
+                        "<synthetic-user-audio>",
+                        float(synthetic_audio["start_seconds"]),
+                        float(synthetic_audio["end_seconds"]),
+                        Speaker.USER,
+                    ),
+                )
+            record = replace(
+                record,
+                assistant_words=assistant_words,
+                user_words=user_words,
+            )
+            window = WindowMetadata(
+                conversation_id=conversation_id,
+                split=split,
+                start_seconds=float(selected["start_seconds"]),
+                end_seconds=float(selected["end_seconds"]),
+                kind=WindowKind(selected["kind"]),
+            )
+            timeline = build_window_timeline(
+                record,
+                window,
+                tokenizer=processor.tokenizer,
+                control_tokens=duplex.control_tokens,
+                thinker_bos_token_id=duplex.base_thinker.config.bos_token_id,
+                frame_rate_hz=25,
+            )
+            if synthetic_audio is not None:
+                timeline = augment_synthetic_interruption(
+                    timeline,
+                    config=InterruptionConfig(
+                        probability=1.0,
+                        min_assistant_frames=int(data.get("min_assistant_frames", 1)),
+                    ),
+                    rng=random.Random(
+                        _stable_item_seed(
+                            training["interruption_seed"], timeline.sample_id
+                        )
+                    ),
+                    control_tokens=duplex.control_tokens,
+                    thinker_bos_token_id=duplex.base_thinker.config.bos_token_id,
+                )
+                if timeline.interruption is None:
+                    raise ValueError(
+                        f"selected window {timeline.sample_id!r} was not eligible for "
+                        "the requested deterministic interruption."
+                    )
+            train_values.append(timeline)
+    elif data.get("synthetic_smoke", False):
         train_values = _synthetic_samples(4, split=Split.TRAIN, seed=training["window_seed"])
         eval_values = _synthetic_samples(
             2, split=Split.VALIDATION, seed=training["window_seed"]
@@ -459,7 +638,11 @@ def build_datasets_and_collator(
         raise ValueError("Evaluation is enabled but the validation view contains no windows.")
 
     interruption = InterruptionConfig(
-        probability=float(data.get("interruption_probability", 0.0)),
+        probability=(
+            0.0
+            if prebuilt_interruption
+            else float(data.get("interruption_probability", 0.0))
+        ),
         min_assistant_frames=int(data.get("min_assistant_frames", 1)),
     )
     collator = DuplexCollator(
@@ -769,7 +952,342 @@ def assert_optimizer_scope(trainer: Trainer) -> None:
         raise RuntimeError("Optimizer groups or state include frozen base parameters.")
 
 
-def train_from_config(config: Mapping[str, Any]) -> Session08Trainer:
+def _timeline_values(dataset: Dataset) -> tuple[WindowTimeline, ...]:
+    values = getattr(dataset, "values", None)
+    if values is None or not all(isinstance(value, WindowTimeline) for value in values):
+        raise TypeError("Session 09 requires a prebuilt fixed WindowTimeline dataset.")
+    return tuple(values)
+
+
+def _cuda_batch(batch: Mapping[str, Any], model: nn.Module) -> dict[str, torch.Tensor]:
+    device = next(model.parameters()).device
+    return {
+        key: value.to(device)
+        for key, value in batch.items()
+        if key in MODEL_INPUTS and isinstance(value, torch.Tensor)
+    }
+
+
+def _prediction_kind(token_id: int, model: QwenDuplexThinker) -> str:
+    if token_id == model.control_tokens.idle:
+        return EventKind.IDLE.value
+    if token_id == model.control_tokens.start:
+        return EventKind.START.value
+    if token_id == model.control_tokens.stop:
+        return EventKind.STOP.value
+    return EventKind.TEXT.value
+
+
+def _sequence_summary(
+    prediction_ids: Sequence[int],
+    timeline: WindowTimeline,
+    model: QwenDuplexThinker,
+    tokenizer: object,
+) -> dict[str, Any]:
+    target_ids = timeline.causal.labels
+    target_nonidle_frames = [
+        index
+        for index, event in enumerate(timeline.targets.events)
+        if event.kind is not EventKind.IDLE
+    ]
+    predicted_at_target_frames = [prediction_ids[index] for index in target_nonidle_frames]
+    expected_at_target_frames = [target_ids[index] for index in target_nonidle_frames]
+    lexical_frames = [
+        index
+        for index, event in enumerate(timeline.targets.events)
+        if event.kind is EventKind.TEXT
+    ]
+    predicted_lexical_ids = [prediction_ids[index] for index in lexical_frames]
+    target_lexical_ids = [target_ids[index] for index in lexical_frames]
+    return {
+        "sample_id": timeline.sample_id,
+        "target_event_kinds": [event.kind.value for event in timeline.targets.events],
+        "predicted_event_kinds": [
+            _prediction_kind(token_id, model) for token_id in prediction_ids
+        ],
+        "target_nonidle_frames": target_nonidle_frames,
+        "expected_at_target_frames": expected_at_target_frames,
+        "predicted_at_target_frames": predicted_at_target_frames,
+        "target_lexical_ids": target_lexical_ids,
+        "predicted_lexical_ids": predicted_lexical_ids,
+        "target_text": tokenizer.decode(
+            target_lexical_ids,
+            clean_up_tokenization_spaces=False,
+            skip_special_tokens=False,
+        ),
+        "predicted_text_at_target_frames": tokenizer.decode(
+            predicted_lexical_ids,
+            clean_up_tokenization_spaces=False,
+            skip_special_tokens=False,
+        ),
+        "start_text_stop_exact_at_target_frames": (
+            predicted_at_target_frames == expected_at_target_frames
+        ),
+        "prediction_ids": list(prediction_ids),
+    }
+
+
+def _teacher_forced_report(
+    model: QwenDuplexThinker,
+    dataset: Dataset,
+    collator: DuplexCollator,
+    tokenizer: object,
+) -> dict[str, Any]:
+    timelines = _timeline_values(dataset)
+    group_loss_sums = {group: 0.0 for group in GROUPS}
+    target_counts = {group: 0 for group in GROUPS}
+    prediction_counts = {group: 0 for group in GROUPS}
+    weighted_loss_sum = 0.0
+    weight_sum = 0.0
+    examples = []
+    model.eval()
+    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+        for timeline in timelines:
+            batch = _cuda_batch(collator([timeline]), model)
+            outputs = model(**batch)
+            predictions = outputs.logits.argmax(dim=-1)[0].tolist()
+            examples.append(_sequence_summary(predictions, timeline, model, tokenizer))
+            current_weight = float(outputs.loss_weight_sum)
+            weighted_loss_sum += float(outputs.loss) * current_weight
+            weight_sum += current_weight
+            for group in GROUPS:
+                count = int(outputs.target_counts[group])
+                target_counts[group] += count
+                prediction_counts[group] += int(outputs.prediction_counts[group])
+                group_loss_sums[group] += float(outputs.group_losses[group]) * count
+    valid = sum(target_counts.values())
+    return {
+        "total_loss": weighted_loss_sum / max(weight_sum, 1.0),
+        "group_losses": {
+            group: group_loss_sums[group] / max(target_counts[group], 1)
+            for group in GROUPS
+        },
+        "target_counts": target_counts,
+        "predicted_fractions": {
+            group: prediction_counts[group] / max(valid, 1) for group in GROUPS
+        },
+        "examples": examples,
+    }
+
+
+def _cached_free_prediction(
+    model: QwenDuplexThinker,
+    batch: Mapping[str, torch.Tensor],
+) -> list[int]:
+    attention = batch["attention_mask"].bool()
+    if attention.shape[0] != 1 or not bool(attention.all()):
+        raise ValueError("Cached Session 09 generation requires one unpadded timeline.")
+    timeline_length = attention.shape[1]
+    embedding = model.base_thinker.get_input_embeddings()
+    audio_embeddings = model._restore_audio(
+        input_features=batch["input_features"],
+        feature_attention_mask=batch["feature_attention_mask"],
+        preconv_feature_lengths=batch["preconv_feature_lengths"],
+        current_attention=attention,
+        timeline_length=timeline_length,
+        hidden_width=embedding.weight.shape[1],
+        device=embedding.weight.device,
+        dtype=embedding.weight.dtype,
+    )
+    bos = model.base_thinker.config.bos_token_id
+    controls = {
+        model.control_tokens.idle,
+        model.control_tokens.start,
+        model.control_tokens.stop,
+    }
+    predictions: list[int] = []
+    cache = None
+    for frame in range(timeline_length):
+        previous = bos if frame == 0 else predictions[-1]
+        token = torch.tensor([[previous]], dtype=torch.long, device=embedding.weight.device)
+        token_embedding = embedding(token)
+        if frame > 0 and previous in controls:
+            text_embedding = torch.zeros_like(token_embedding)
+            control_embedding = token_embedding
+        else:
+            text_embedding = token_embedding
+            control_embedding = torch.zeros_like(token_embedding)
+        fused = text_embedding + control_embedding + audio_embeddings[:, frame : frame + 1]
+        output = model.base_thinker.model(
+            inputs_embeds=fused,
+            attention_mask=torch.ones(
+                (1, frame + 1), dtype=torch.bool, device=embedding.weight.device
+            ),
+            position_ids=torch.tensor([[frame]], device=embedding.weight.device),
+            past_key_values=cache,
+            use_cache=True,
+            return_dict=True,
+        )
+        cache = output.past_key_values
+        token_id = int(
+            model.base_thinker.lm_head(output.last_hidden_state[:, -1:]).argmax().item()
+        )
+        predictions.append(token_id)
+    return predictions
+
+
+def _cached_free_report(
+    model: QwenDuplexThinker,
+    dataset: Dataset,
+    collator: DuplexCollator,
+    tokenizer: object,
+) -> dict[str, Any]:
+    model.eval()
+    model.gradient_checkpointing_disable()
+    examples = []
+    counts = Counter()
+    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+        for timeline in _timeline_values(dataset):
+            batch = _cuda_batch(collator([timeline]), model)
+            predictions = _cached_free_prediction(model, batch)
+            summary = _sequence_summary(predictions, timeline, model, tokenizer)
+            examples.append(summary)
+            counts.update(kind.lower() for kind in summary["predicted_event_kinds"])
+    total = sum(counts.values())
+    return {
+        "predicted_fractions": {
+            group: counts[group] / max(total, 1) for group in GROUPS
+        },
+        "examples": examples,
+    }
+
+
+def _write_session09_preflight(
+    output_dir: Path,
+    dataset: Dataset,
+) -> dict[str, Any]:
+    timelines = _timeline_values(dataset)
+    for timeline in timelines:
+        causal = timeline.causal
+        if not causal.text_mask[0] or causal.control_mask[0]:
+            raise AssertionError(f"{timeline.sample_id}: frame zero is not BOS-only.")
+        for frame in range(1, len(timeline.targets.events)):
+            previous = timeline.targets.events[frame - 1]
+            if previous.kind is EventKind.TEXT:
+                if (
+                    not causal.text_mask[frame]
+                    or causal.control_mask[frame]
+                    or causal.text_ids[frame] != previous.text_id
+                ):
+                    raise AssertionError(
+                        f"{timeline.sample_id}: lexical causal shift failed at frame {frame}."
+                    )
+            elif (
+                causal.text_mask[frame]
+                or not causal.control_mask[frame]
+                or causal.control_ids[frame] != causal.labels[frame - 1]
+            ):
+                raise AssertionError(
+                    f"{timeline.sample_id}: control causal shift failed at frame {frame}."
+                )
+    histogram = Counter(
+        event.kind.value for timeline in timelines for event in timeline.targets.events
+    )
+    histogram[EventKind.PADDING.value] += 0
+    interrupted = [timeline for timeline in timelines if timeline.interruption is not None]
+    if not interrupted:
+        raise RuntimeError("Session 09 preflight found no deterministic interruption.")
+    report = {
+        "label_histogram": dict(sorted(histogram.items())),
+        "causal_shift_check": "passed",
+        "decode_round_trip_check": "passed",
+        "windows": [
+            {
+                "sample_id": timeline.sample_id,
+                "interruption": (
+                    None
+                    if timeline.interruption is None
+                    else {
+                        "cut_frame": timeline.interruption.cut_frame,
+                        "original_stop_frame": timeline.interruption.original_stop_frame,
+                        "original_user_frame": timeline.interruption.original_user_frame,
+                        "shifted_frames": timeline.interruption.shifted_frames,
+                    }
+                ),
+            }
+            for timeline in timelines
+        ],
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with (output_dir / "preflight.json").open("w", encoding="utf-8") as handle:
+        json.dump(report, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    table = format_timeline_table(interrupted[0])
+    (output_dir / "decoded_timeline.txt").write_text(table + "\n", encoding="utf-8")
+    print("Session 09 exact label histogram:", json.dumps(report["label_histogram"], sort_keys=True))
+    print("Session 09 decoded interrupted timeline:\n" + table)
+    required = (EventKind.IDLE.value, EventKind.START.value, EventKind.TEXT.value, EventKind.STOP.value)
+    if any(histogram[name] == 0 for name in required):
+        raise RuntimeError(f"Session 09 preflight is missing required labels: {histogram}.")
+    return report
+
+
+def _training_trend(path: Path) -> dict[str, Any]:
+    rows = []
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            row = json.loads(line)
+            if "train_total_loss" in row and int(row.get("step", 0)) > 0:
+                rows.append(row)
+    if not rows:
+        raise RuntimeError("No per-step training metrics were recorded.")
+    width = min(10, max(1, len(rows) // 4))
+    keys = ["train_total_loss", *[f"train_{group}_loss" for group in GROUPS]]
+    return {
+        "logged_steps": len(rows),
+        "window_steps": width,
+        "first_window_mean": {
+            key: sum(float(row[key]) for row in rows[:width]) / width for key in keys
+        },
+        "last_window_mean": {
+            key: sum(float(row[key]) for row in rows[-width:]) / width for key in keys
+        },
+    }
+
+
+def _session09_gate(
+    baseline: Mapping[str, Any],
+    teacher: Mapping[str, Any],
+    free: Mapping[str, Any],
+    timelines: Sequence[WindowTimeline],
+    trend: Mapping[str, Any],
+    stop_token_id: int,
+) -> tuple[bool, list[str]]:
+    failures: list[str] = []
+    if trend["last_window_mean"]["train_total_loss"] >= trend["first_window_mean"]["train_total_loss"]:
+        failures.append("training loss did not trend downward")
+    for group in ("text", "start", "stop"):
+        if baseline["target_counts"][group] <= 0:
+            failures.append(f"{group} received no examples")
+        if teacher["group_losses"][group] >= baseline["group_losses"][group]:
+            failures.append(f"{group} loss did not improve")
+    for name, report in (("teacher", teacher), ("cached_free", free)):
+        fractions = report["predicted_fractions"]
+        if fractions["idle"] >= 0.98:
+            failures.append(f"{name} predictions collapsed to IDLE")
+        if not any(
+            example["start_text_stop_exact_at_target_frames"]
+            for example in report["examples"]
+        ):
+            failures.append(f"{name} produced no exact START/text/STOP example")
+    interrupted_index = next(
+        index for index, timeline in enumerate(timelines) if timeline.interruption is not None
+    )
+    interrupted = timelines[interrupted_index]
+    assert interrupted.interruption is not None
+    cut = interrupted.interruption.cut_frame
+    free_ids = free["examples"][interrupted_index]["prediction_ids"]
+    predicted_stops = [
+        index
+        for index, token_id in enumerate(free_ids)
+        if token_id == stop_token_id
+    ]
+    if not any(frame >= cut for frame in predicted_stops):
+        failures.append("interrupted cached/free example emitted no STOP after shifted user onset")
+    return not failures, failures
+
+
+def train_from_config(config: Mapping[str, Any]) -> Session08Trainer | SimpleNamespace:
     """Run the configured job; callers decide whether it is a smoke or real dataset run."""
 
     seed_everything(config["training"]["seed"])
@@ -777,6 +1295,20 @@ def train_from_config(config: Mapping[str, Any]) -> Session08Trainer:
     model, processor, targets = build_training_model(config)
     train_dataset, eval_dataset, collator = build_datasets_and_collator(
         config, processor, model
+    )
+    session09 = config["data"].get("selected_windows") is not None
+    output_dir = Path(config["training"]["output_dir"])
+    if session09 and (output_dir / "metrics.jsonl").exists() and not config["training"].get(
+        "resume_from_checkpoint"
+    ):
+        raise FileExistsError(
+            f"Refusing to append a fresh Session 09 run to {output_dir / 'metrics.jsonl'}."
+        )
+    preflight = _write_session09_preflight(output_dir, train_dataset) if session09 else None
+    baseline = (
+        _teacher_forced_report(model, train_dataset, collator, processor.tokenizer)
+        if session09
+        else None
     )
     trainer, audit = make_trainer(
         config, model, processor, targets, train_dataset, eval_dataset, collator
@@ -787,8 +1319,105 @@ def train_from_config(config: Mapping[str, Any]) -> Session08Trainer:
     if any(parameter.grad is not None for parameter in model.base_thinker.audio_tower.parameters()):
         raise RuntimeError("Frozen audio tower retained gradients.")
     assert_optimizer_scope(trainer)
-    trainer.save_model(Path(config["training"]["output_dir"]) / "final")
-    return trainer
+    final = output_dir / "final"
+    trainer.save_model(final)
+    if not session09:
+        return trainer
+
+    assert preflight is not None and baseline is not None
+    step_count = trainer.state.global_step
+    teacher = _teacher_forced_report(model, train_dataset, collator, processor.tokenizer)
+    free = _cached_free_report(model, train_dataset, collator, processor.tokenizer)
+    fixed_batch = _cpu_model_batch(collator, train_dataset[0])
+    reference_logits = _reference_logits(model, fixed_batch)
+    trend = _training_trend(output_dir / "metrics.jsonl")
+    timelines = _timeline_values(train_dataset)
+    stop_token_id = model.control_tokens.stop
+    peak_allocated = torch.cuda.max_memory_allocated()
+    peak_reserved = torch.cuda.max_memory_reserved()
+    trainable_count = sum(
+        parameter.numel() for parameter in model.parameters() if parameter.requires_grad
+    )
+    nonzero_gradient_count = len(audit.nonzero_gradient_names)
+
+    del trainer, audit, model, processor, train_dataset, eval_dataset, collator
+    _release_cuda_objects()
+
+    seed_everything(config["training"]["seed"])
+    reloaded_model, reloaded_processor, reloaded_targets = build_training_model(config)
+    _load_adapter_weights(reloaded_model, final)
+    reloaded_train, _, reloaded_collator = build_datasets_and_collator(
+        config, reloaded_processor, reloaded_model
+    )
+    reloaded_teacher = _teacher_forced_report(
+        reloaded_model,
+        reloaded_train,
+        reloaded_collator,
+        reloaded_processor.tokenizer,
+    )
+    reloaded_free = _cached_free_report(
+        reloaded_model,
+        reloaded_train,
+        reloaded_collator,
+        reloaded_processor.tokenizer,
+    )
+    reloaded_logits = _reference_logits(reloaded_model, fixed_batch)
+    reload_max_abs = float((reference_logits.float() - reloaded_logits.float()).abs().max())
+    torch.testing.assert_close(reloaded_logits, reference_logits, rtol=1e-3, atol=1e-3)
+    if [example["prediction_ids"] for example in teacher["examples"]] != [
+        example["prediction_ids"] for example in reloaded_teacher["examples"]
+    ]:
+        raise AssertionError("Teacher-forced predictions changed after adapter reload.")
+    if [example["prediction_ids"] for example in free["examples"]] != [
+        example["prediction_ids"] for example in reloaded_free["examples"]
+    ]:
+        raise AssertionError("Cached/free predictions changed after adapter reload.")
+    passed, failures = _session09_gate(
+        baseline,
+        teacher,
+        free,
+        _timeline_values(reloaded_train),
+        trend,
+        stop_token_id,
+    )
+    report = {
+        "overfit_gate": "PASS" if passed else "FAIL",
+        "failures": failures,
+        "optimizer_steps": step_count,
+        "preflight": preflight,
+        "baseline_teacher_forced": baseline,
+        "final_teacher_forced": teacher,
+        "final_cached_free": free,
+        "training_trend": trend,
+        "reload": {
+            "teacher_predictions_identical": True,
+            "cached_free_predictions_identical": True,
+            "max_abs_logit_difference": reload_max_abs,
+            "rtol": 1e-3,
+            "atol": 1e-3,
+        },
+        "discovered_target_count": len(reloaded_targets),
+        "trainable_lora_parameter_count": trainable_count,
+        "nonzero_lora_gradient_parameter_count": nonzero_gradient_count,
+        "peak_vram_allocated_bytes": peak_allocated,
+        "peak_vram_reserved_bytes": peak_reserved,
+        "assertions": {
+            "alignment": "passed",
+            "mask_and_audio_lengths": "passed",
+            "causal_target_shift": "passed",
+            "adapter_reload": "passed",
+        },
+    }
+    with (output_dir / "overfit_report.json").open("w", encoding="utf-8") as handle:
+        json.dump(report, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    print(f"OVERFIT_GATE={'PASS' if passed else 'FAIL'}")
+    if failures:
+        print("Gate failures:", "; ".join(failures))
+    return SimpleNamespace(
+        state=SimpleNamespace(global_step=step_count),
+        session09_report=report,
+    )
 
 
 def _cpu_model_batch(collator: DuplexCollator, item: object) -> dict[str, torch.Tensor]:

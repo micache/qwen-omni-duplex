@@ -88,11 +88,16 @@ class QwenDuplexThinker(nn.Module):
         thinker: nn.Module,
         *,
         qwen_config: object,
+        control_tokens: ControlTokenIds | None = None,
         loss_weights: NextEventLossWeights | Mapping[str, float] | None = None,
     ) -> None:
         super().__init__()
         self.thinker = thinker
-        self.control_tokens = ControlTokenIds.from_qwen_config(qwen_config)
+        self.control_tokens = (
+            ControlTokenIds.from_qwen_config(qwen_config)
+            if control_tokens is None
+            else control_tokens
+        )
 
         thinker_config = _config_value(qwen_config, "thinker_config", "thinker_config")
         seconds_per_chunk = _config_value(

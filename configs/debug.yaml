@@ -9,6 +9,7 @@ timeline:
   chunk_seconds: 2.0
   frame_rate_hz: 25
   control_events: [IDLE, START, STOP]
+  control_token_source: thinker_native
 
 task:
   fusion: additive_audio_text_control
@@ -17,10 +18,36 @@ task:
 
 data:
   dataset: DailyTalkContiguous
+  root: /workspace/data/DailyTalkContiguous-session09
+  manifest: dailytalk.jsonl
   synthetic_interruption: true
-  synthetic_smoke: true
+  synthetic_smoke: false
   interruption_probability: 1.0
   min_assistant_frames: 4
+  selected_windows:
+    - conversation_id: data_stereo/1292
+      start_seconds: 0.0
+      end_seconds: 2.0
+      kind: random
+      assistant_word_indices: [0]
+      synthetic_user_audio:
+        start_seconds: 1.68
+        end_seconds: 2.0
+    - conversation_id: data_stereo/2196
+      start_seconds: 0.0
+      end_seconds: 2.0
+      kind: random
+      assistant_word_indices: [0]
+    - conversation_id: data_stereo/382
+      start_seconds: 1.3
+      end_seconds: 3.3
+      kind: random
+      assistant_word_indices: [0, 1]
+    - conversation_id: data_stereo/1942
+      start_seconds: 29.0
+      end_seconds: 31.0
+      kind: random
+      assistant_word_indices: [47, 48]
 
 loss_weights:
   text: 1.0
@@ -37,8 +64,8 @@ lora:
 training:
   method: lora
   run_label: LoRA
-  output_dir: outputs/session08-smoke
-  max_steps: 2
+  output_dir: outputs/session09-overfit-native
+  max_steps: 150
   batch_size: 1
   eval_batch_size: 1
   gradient_accumulation_steps: 1
@@ -49,10 +76,10 @@ training:
   max_grad_norm: 1.0
   bf16: true
   gradient_checkpointing: true
-  eval_strategy: steps
-  eval_steps: 1
+  eval_strategy: "no"
+  eval_steps: null
   save_strategy: steps
-  save_steps: 1
+  save_steps: 50
   save_total_limit: 2
   optimizer: adamw_torch
   dataloader_num_workers: 0

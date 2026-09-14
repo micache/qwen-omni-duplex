@@ -7,7 +7,7 @@ from torch.nn import functional as F
 
 from duplex import model
 from duplex.model import NextEventLossWeights, QwenDuplexThinker
-from duplex.timeline import IGNORE_LABEL
+from duplex.timeline import IGNORE_LABEL, ControlTokenIds
 
 
 VOCAB_SIZE = 9
@@ -139,6 +139,15 @@ def test_control_ids_and_timeline_constants_come_from_qwen_config() -> None:
 
     with pytest.raises(ValueError, match="25 Hz"):
         QwenDuplexThinker(TinyThinker(), qwen_config=qwen_config(positions_per_second=50))
+
+
+def test_existing_thinker_control_ids_can_override_talker_ids() -> None:
+    controls = ControlTokenIds(3, 4, 5, thinker_vocab_size=VOCAB_SIZE)
+    duplex = QwenDuplexThinker(
+        TinyThinker(), qwen_config=qwen_config(), control_tokens=controls
+    )
+
+    assert duplex.control_tokens == controls
 
 
 def test_exact_additive_fusion_masks_and_batch_audio_restoration() -> None:
