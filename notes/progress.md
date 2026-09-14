@@ -510,3 +510,25 @@ gitignored `outputs/session08-smoke/` directory.
 Stop boundary: Session 08 ends here. No main DailyTalk training, QLoRA smoke,
 generation, benchmark, Talker, audio generation, or full-base publication was
 run or added.
+
+## Session 09 — tiny DailyTalk overfit gate
+
+OVERFIT_GATE=PASS
+
+Four explicit public DailyTalkContiguous windows were trained for exactly 150
+BF16-LoRA optimizer steps. The initial Talker-derived control IDs failed
+because frozen Thinker output rows for IDLE and STOP are identical. Switching
+to the existing native Thinker PAD/BOS/EOS rows fixed the unlearnable control
+mapping without adding a head or tokens. Total and text/START/STOP losses all
+fell, teacher-forced and cached/free predictions exactly reproduced every
+window's event kinds and lexical order, the interrupted example stopped at
+shifted user onset, and a fresh save/reload preserved logits and behavior.
+All alignment, causal-shift, mask, audio-length, gradient, optimizer-scope, and
+adapter-only assertions passed. No larger-data run was started.
+
+Exact commands, revisions, hashes, window metadata, hardware/VRAM, the failed
+run, diagnosis, fix, and compact numeric results are recorded in
+`notes/experiments.md`. Local machine-readable outputs are under
+`outputs/session09-overfit-native/` and remain gitignored.
+
+Stop boundary: Session 09 ends here.
