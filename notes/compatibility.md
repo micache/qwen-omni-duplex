@@ -79,6 +79,27 @@ The complete machine-readable result, including raw loading keys, shapes,
 source hashes, environment commands, and per-stage memory snapshots, is
 `notes/session06_probe.json`.
 
+### RTX 3090 transfer check — 2026-09-14
+
+The exact Session 06 command passed on Ubuntu 24.04.4 with Python 3.11.16,
+NVIDIA GeForce RTX 3090 (24,576 MiB, compute capability 8.6), driver 610.57.04,
+CUDA toolkit 12.8, and the same pinned torch 2.10.0+cu126/Transformers 5.17.0
+environment and installed Transformers source hashes. `uv pip check` passed
+for all 83 packages, the full CPU suite passed with 60 tests and five expected
+opt-in/cache-dependent skips, and `flash-attn` remains absent.
+
+The requested and resolved checkpoint revision was exactly
+`f75b40e3da2003cdd6e1829b1f420ca70797c34e`; its three shards again total
+11,972,663,208 bytes. The SDPA direct-Thinker probe passed BF16 support and its
+BF16 kernel, 32,000-sample two-second processor input, batch-two audio encoding,
+model-derived restoration to two `[50,2048]` feature tensors, in-vocabulary
+control IDs 151859/151860/151861, and cached decoding from sequence length 50
+to 51. Peak allocated/reserved CUDA bytes were
+9,423,249,920/9,493,807,104 for load, 9,453,280,256/9,500,098,560 for audio
+encoding, and 8,138,103,808/9,502,195,712 for the pruned Thinker prefill plus
+cached step. This RTX 3090 environment is ready for Session 07; no training or
+FlashAttention installation was performed.
+
 ## Session 07 — full-duplex Thinker wrapper
 
 `duplex/model.py` now wraps the direct Session 06 Thinker without constructing
