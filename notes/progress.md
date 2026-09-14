@@ -440,3 +440,73 @@ recorded for Session 07.
 
 Stop boundary: Session 07 ends here. No trainer, Talker, generation path, model
 or dataset download, or long job was added or run.
+
+## Session 08 — BF16 LoRA training and adapter checkpoints
+
+Status: implementation and bounded synthetic GPU smoke complete. The main
+DailyTalk experiment was not launched.
+
+Implemented:
+
+- A single-YAML `train.py` path using a small Transformers `Trainer` subclass
+  and the Session 07 model's already-aligned weighted loss, with no second token
+  shift or label smoothing.
+- Independent explicit seeds for Python, NumPy, torch/CUDA, conversation split
+  salt, fixed-window sampling, Trainer sampling, workers, and synthetic
+  interruption augmentation.
+- The primary BF16 LoRA recipe for a 24 GB GPU and a separate, explicitly
+  selected 4-bit NF4 QLoRA recipe with BF16 compute for a 16 GB fallback. OOM
+  fallback is disabled, and output labels must match `LoRA` or `QLoRA`.
+- Full-base freezing before PEFT injection, explicit freezing/pruning of the
+  unused vision tower, and freezing of the audio tower plus any Talker,
+  token-to-wave/waveform decoder if present. Embeddings and the LM head remain
+  frozen.
+- Runtime discovery from the loaded pinned model of 36 decoder layers at
+  `model.layers.0` through `.35`. LoRA targets are the 252 exact existing paths
+  under `self_attn.{q,k,v,o}_proj` and `mlp.{gate,up,down}_proj`; same-named
+  audio/vision modules are excluded. Rank starts at 16.
+- Gradient accumulation, BF16 autocast, non-reentrant gradient checkpointing,
+  evaluation/save cadence, retention, and resume through Trainer. Non-finite
+  loss/gradients/logs, empty weighted batches, and trainable parameters outside
+  the exact LoRA allowlist fail closed.
+- JSONL logging of total and per-event losses, label counts, predicted event
+  fractions, learning rate, lexical-token and frame counts, and peak allocated
+  and reserved VRAM. TensorBoard receives the same merged metrics when selected.
+- Adapter-only checkpoints containing PEFT safetensors/config, the Qwen
+  processor/tokenizer, exact base ID/revision, dependency versions, control-ID
+  mapping, two-second/25 Hz timeline, task/loss/LoRA metadata, and the complete
+  training YAML. Trainer checkpoints additionally retain optimizer, scheduler,
+  RNG, and Trainer state; full base weights are rejected.
+- Focused CPU tests for exact target discovery, tower exclusion, the trainable
+  allowlist, checked-in configuration contracts, and explicit QLoRA selection.
+
+Validation commands run:
+
+```bash
+.venv/bin/python -m pytest -q
+.venv/bin/python -m compileall -q duplex train.py tests
+git diff --check
+.venv/bin/python train.py --help
+.venv/bin/python train.py --config configs/debug.yaml --smoke-test
+```
+
+The canonical smoke used BF16 rank-16 LoRA and synthetic two-second audio with
+deterministic interruption. It ran two optimizer steps, loaded `checkpoint-2`
+into a fresh pinned Thinker, reproduced logits with maximum absolute difference
+0.0 (`rtol=atol=1e-3`), then resumed for exactly one further nonzero-learning-
+rate update and ended at step 3. All 504 adapter tensors, representing
+29,933,568 trainable parameters on 252 text-decoder projections, received a
+nonzero gradient during the run. Audio-tower gradient count was zero, and the
+optimizer parameter groups and state contained only trainable LoRA parameters.
+Peak allocated/reserved CUDA memory was 9,433,796,608/10,104,078,336 bytes on
+an RTX 3090 with 24,576 MiB. Checkpoint artifact inspection found no full base
+weight file and confirmed all required metadata and processor/tokenizer files.
+
+The normal suite passes with 66 tests and five expected opt-in/cache-dependent
+skips. TensorBoard 2.20.0 was added to the local environment and requirements;
+no model or dataset was downloaded. The smoke artifacts remain local under the
+gitignored `outputs/session08-smoke/` directory.
+
+Stop boundary: Session 08 ends here. No main DailyTalk training, QLoRA smoke,
+generation, benchmark, Talker, audio generation, or full-base publication was
+run or added.

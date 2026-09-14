@@ -41,3 +41,25 @@ memory was 9,446,580,736 bytes for load, 9,470,790,144 for audio encoding, and
 8,154,948,608 after vision pruning for prefill plus cached decode. The raw
 result and exact command are recorded in `notes/session06_probe.json` and
 `notes/compatibility.md`.
+
+## 2026-09-14 — Session 08 synthetic LoRA smoke
+
+This was a three-optimizer-step synthetic correctness smoke, not the main
+DailyTalk experiment. It used `configs/debug.yaml` at rank 16 in BF16 on one
+NVIDIA GeForce RTX 3090 (24,576 MiB), with the pinned base revision and package
+set. The command was:
+
+```bash
+.venv/bin/python train.py --config configs/debug.yaml --smoke-test
+```
+
+Two initial steps saved `checkpoint-2`; a fresh direct Thinker load plus the
+saved adapter reproduced the fixed-batch logits exactly (maximum absolute
+difference 0.0 at `rtol=atol=1e-3`). Trainer state and optimizer state then
+resumed from step 2 and completed exactly one further update at learning rate
+2e-4, ending at step 3. All 504 LoRA A/B tensors (29,933,568 parameters across
+252 discovered text-decoder projections) received nonzero gradients during the
+run. No audio-tower parameter had a gradient, and optimizer groups/state were
+limited to trainable LoRA parameters. Peak CUDA allocated/reserved memory was
+9,433,796,608/10,104,078,336 bytes. `outputs/session08-smoke/smoke_report.json`
+contains the machine-readable local result and is intentionally gitignored.

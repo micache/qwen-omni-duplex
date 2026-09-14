@@ -2,6 +2,7 @@ model:
   name: Qwen/Qwen2.5-Omni-3B
   revision: f75b40e3da2003cdd6e1829b1f420ca70797c34e
   component: thinker
+  local_files_only: true
   load_in_4bit: true
 
 timeline:
@@ -16,11 +17,61 @@ task:
 
 data:
   dataset: DailyTalkContiguous
+  root: /path/to/DailyTalkContiguous
+  manifest: dailytalk.jsonl
   synthetic_interruption: true
+  interruption_probability: 0.5
+  min_assistant_frames: 4
+  random_windows_per_conversation: 1
+  include_boundary_windows: true
+  speaker_label_map:
+    SPEAKER_MAIN: assistant
+  max_train_samples: null
+  max_eval_samples: null
+
+loss_weights:
+  text: 1.0
+  idle: 0.25
+  start: 4.0
+  stop: 4.0
+
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  target_projections: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
 
 training:
   method: qlora
+  run_label: QLoRA
+  output_dir: outputs/session08-qlora
+  max_steps: 1000
   batch_size: 1
+  eval_batch_size: 1
   gradient_accumulation_steps: 16
   learning_rate: 2.0e-4
+  lr_scheduler_type: cosine
+  weight_decay: 0.0
+  warmup_steps: 50
+  max_grad_norm: 1.0
+  bf16: true
+  gradient_checkpointing: true
+  eval_strategy: steps
+  eval_steps: 50
+  save_strategy: steps
+  save_steps: 50
+  save_total_limit: 2
+  optimizer: adamw_torch
+  dataloader_num_workers: 0
+  auto_find_batch_size: false
+  full_determinism: false
   seed: 17
+  split_seed: 18
+  window_seed: 19
+  interruption_seed: 20
+  resume_from_checkpoint: null
+
+logging:
+  backends: [jsonl, tensorboard]
+  steps: 1
+  disable_tqdm: false

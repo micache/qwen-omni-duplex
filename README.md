@@ -52,7 +52,7 @@ Padding is ignored.
 
 ## Current status
 
-The repository is implemented through the model-integration stage:
+The repository is implemented through the small-scale training/checkpoint stage:
 
 - strict two-second/25 Hz causal event timelines;
 - whole-utterance text tokenization and word-to-frame alignment;
@@ -61,13 +61,15 @@ The repository is implemented through the model-integration stage:
 - Qwen audio-tower feature extraction and flattened batch restoration;
 - additive audio/text/control fusion in the shared 2,048-wide hidden space;
 - weighted next-event loss with per-group losses and counts;
+- BF16 LoRA training with explicit NF4/BF16 QLoRA fallback configuration;
+- adapter-only checkpoints, deterministic seeding, metric logging, and resume;
 - cache, position-ID, and last-position decoding support;
 - CPU unit tests and opt-in real-checkpoint GPU integration tests.
 
-The trainer and generation loop are not implemented yet. No model has been
-trained, and this repository does not currently provide checkpoints, generated
-samples, or benchmark scores. The YAML files in `configs/` are experiment
-sketches for later sessions, not runnable training recipes yet.
+The generation loop is not implemented. No main dataset experiment or benchmark
+has been run; Session 08 only ran a three-step synthetic smoke test. The YAML
+files in `configs/` are runnable local recipes after the dataset path and any
+separately verified speaker-label mapping are supplied.
 
 ## Setup
 
@@ -157,16 +159,32 @@ RUN_QWEN_GPU_TESTS=1 \
 The GPU suite checks text-only parity with the base Thinker, one real
 two-second audio forward, a batch-of-two forward, and no-gradient peak VRAM.
 
+## Training
+
+The primary 24 GB path is BF16 LoRA. Edit only the local dataset path and any
+verified user speaker label in `configs/train_lora.yaml`, then run:
+
+```bash
+.venv/bin/python train.py --config configs/train_lora.yaml
+```
+
+The explicit 16 GB fallback is `configs/train_qlora_16gb.yaml`, which selects
+4-bit NF4 loading with BF16 compute and labels outputs as QLoRA. Training never
+switches to it automatically after an out-of-memory error. Both paths save only
+PEFT adapters, processor/tokenizer files, reconstruction metadata, and Trainer
+resume state; full Qwen base weights are never written.
+
 ## Repository structure
 
 ```text
 duplex/dataset.py       DailyTalk reader, windows, augmentation, and collator
 duplex/timeline.py      event grammar, token alignment, and causal shifting
 duplex/model.py         additive full-duplex Thinker wrapper and weighted loss
+duplex/training.py      LoRA/QLoRA loading, Trainer, logging, and checkpoints
 scripts/                data inspection, preparation, and compatibility probe
 tests/                  CPU unit tests and opt-in GPU integration tests
 notes/                  design decisions, compatibility evidence, and progress
-configs/                future LoRA/QLoRA experiment sketches
+configs/                BF16 LoRA, explicit QLoRA fallback, and smoke recipes
 ```
 
 ## References

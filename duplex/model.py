@@ -127,23 +127,48 @@ class QwenDuplexThinker(nn.Module):
         # position-wise Linear, so applying it after slicing the sequence is
         # exactly equivalent to slicing full logits and avoids a large prefill
         # allocation.  Refuse the optimization if that API boundary changes.
-        self.supports_last_position_only = isinstance(self.thinker.lm_head, nn.Linear)
+        self.supports_last_position_only = isinstance(self.base_thinker.lm_head, nn.Linear)
+
+    @property
+    def base_thinker(self) -> nn.Module:
+        """Resolve the Qwen model beneath PEFT without registering it twice."""
+
+        get_base_model = getattr(self.thinker, "get_base_model", None)
+        return get_base_model() if callable(get_base_model) else self.thinker
 
     @property
     def frames_per_chunk(self) -> int:
         return self.timeline.frames_per_chunk
 
+    def gradient_checkpointing_enable(
+        self,
+        gradient_checkpointing_kwargs=None,
+        every_n_layers: int = 1,
+        offload: bool = False,
+    ) -> None:
+        """Delegate Trainer's checkpointing switch to the PEFT-wrapped Thinker."""
+
+        self.thinker.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs=gradient_checkpointing_kwargs,
+            every_n_layers=every_n_layers,
+            offload=offload,
+        )
+
+    def gradient_checkpointing_disable(self) -> None:
+        self.thinker.gradient_checkpointing_disable()
+
     def _validate_thinker_boundary(self) -> None:
+        thinker = self.base_thinker
         required = ("audio_tower", "model", "lm_head", "get_audio_features")
-        missing = [name for name in required if not hasattr(self.thinker, name)]
+        missing = [name for name in required if not hasattr(thinker, name)]
         if missing:
             raise TypeError(f"Thinker is missing required Qwen components: {missing}.")
-        if not hasattr(self.thinker, "get_input_embeddings"):
+        if not hasattr(thinker, "get_input_embeddings"):
             raise TypeError("Thinker must expose its original input embedding table.")
-        if not hasattr(self.thinker.audio_tower, "_get_feat_extract_output_lengths"):
+        if not hasattr(thinker.audio_tower, "_get_feat_extract_output_lengths"):
             raise TypeError("Qwen audio tower has no output-length helper.")
 
-        thinker_config = getattr(self.thinker, "config", None)
+        thinker_config = getattr(thinker, "config", None)
         text_config = getattr(thinker_config, "text_config", None)
         model_vocab_size = getattr(text_config, "vocab_size", None)
         if (
@@ -249,7 +274,7 @@ class QwenDuplexThinker(nn.Module):
                 "preconv_feature_lengths do not match feature_attention_mask sums."
             )
 
-        length_result = self.thinker.audio_tower._get_feat_extract_output_lengths(
+        length_result = self.base_thinker.audio_tower._get_feat_extract_output_lengths(
             mask_lengths
         )
         if not isinstance(length_result, (tuple, list)) or len(length_result) != 2:
@@ -276,7 +301,7 @@ class QwenDuplexThinker(nn.Module):
         if not torch.equal(current_attention, expected_padding):
             raise ValueError("Timeline attention must be contiguous with trailing padding.")
 
-        audio_output = self.thinker.get_audio_features(
+        audio_output = self.base_thinker.get_audio_features(
             input_features=input_features,
             feature_attention_mask=feature_attention_mask,
             return_dict=True,
@@ -388,7 +413,8 @@ class QwenDuplexThinker(nn.Module):
                 "last-position-only logits."
             )
 
-        embedding = self.thinker.get_input_embeddings()
+        thinker = self.base_thinker
+        embedding = thinker.get_input_embeddings()
         text_embeddings = embedding(text_ids)
         control_embeddings = embedding(control_ids)
         text_embeddings = text_embeddings * text_mask.unsqueeze(-1).to(
@@ -421,7 +447,7 @@ class QwenDuplexThinker(nn.Module):
             audio_embeddings = torch.zeros_like(text_embeddings)
 
         fused_embeddings = text_embeddings + audio_embeddings + control_embeddings
-        model_outputs = self.thinker.model(
+        model_outputs = thinker.model(
             attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_values=past_key_values,
@@ -436,7 +462,7 @@ class QwenDuplexThinker(nn.Module):
         logits_input = lexical_hidden_states
         if last_position_only:
             logits_input = logits_input[:, -1:, :]
-        logits = self.thinker.lm_head(logits_input)
+        logits = thinker.lm_head(logits_input)
 
         loss = None
         loss_weight_sum = None
