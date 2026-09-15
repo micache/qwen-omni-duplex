@@ -169,3 +169,136 @@ scope, and adapter-only checkpoint assertions all passed. The full local suite
 after the fix passed with 67 tests and five expected opt-in/cache-dependent
 skips. Machine-readable metrics and the gate result are in the gitignored
 `outputs/session09-overfit-native/` directory.
+
+## 2026-09-15 — Session 11 internal metrics and small-data diagnostic
+
+Status: **SMALL_DATA_GATE=PASS**. This was one weighted diagnostic on a fixed
+public subset, not the main run and not a paper ablation. The prerequisite
+`OVERFIT_GATE=PASS` was confirmed from Session 09, and the Session 10 real
+streaming smoke was confirmed from its 56-record adapter trace and legal STOP.
+No unweighted training run was needed because the complete target histogram
+already demonstrated IDLE dominance.
+
+The Session 11 implementation and fixed compact manifest are commit
+`7bcb5d7d2e3ae8b117d56704d49acb5b376ddac9`, based on Session 10 commit
+`69836b224bc1d5805e8c19299cb3a574ed80bb60`.
+
+### Data, selection, and weights
+
+The public DailyTalkContiguous revision was
+`33e1b501f725a6f4ed4ded95e16cd7f66b9d4bdc`. The fixed subset contains 100
+conversation IDs: 80 train and 20 validation under split salt
+`DailyTalkContiguous-session11-112`. Each selected 8-second span is represented
+as four contiguous fixed 2-second chunks; chunking therefore remains exactly
+2 seconds at 25 Hz. Each conversation contributes its four normal chunks and
+one deterministic interrupted duplicate, giving 400 train and 100 validation
+examples. The exact IDs, spans, interruption chunk indices, cut frames, and
+source user frames are in `notes/session11_subset.yaml`. The full local
+manifest is `outputs/session11-diagnostic/subset_manifest.json`, SHA-256
+`b9e5dae51d84a1587739bbfe657a70e3966e33f8de5e9c798ceab8ba1ac0b16c`.
+The compact checked-in manifest SHA-256 is
+`e28c0ae0c43cd35bcc838b093b477c832136a1fd7cfd9108ab7de3dcbd4c35b3`.
+
+User activity for the synthetic splice was derived only from the public right
+channel with deterministic 40 ms RMS frames, floor 0.005, 0.10 times the 95th
+percentile, gaps of at most two frames merged, and a minimum two active frames.
+Frames overlapping annotated assistant words were removed before runs were
+formed. This is synthetic interruption metadata, not a claim that the public
+sidecar supplies user transcripts.
+
+The complete histogram was computed and printed before selecting weights:
+
+| split | frames | IDLE | TEXT | START | STOP | PADDING |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| train | 20,000 | 18,821 | 807 | 186 | 186 | 0 |
+| validation | 5,000 | 4,729 | 181 | 45 | 45 | 0 |
+| all | 25,000 | 23,550 | 988 | 231 | 231 | 0 |
+
+IDLE was 94.2% of all targets. The provisional public weights were chosen as
+`text=1.0`, `idle=0.05`, `start=4.0`, and `stop=4.0`; their full-subset weighted
+target masses are 988, 1,177.5, 924, and 924. These are public-data-derived
+diagnostic weights and are not Huawei values. The passing evidence promoted
+these weights and the 8-second/four-chunk selection span to
+`configs/train_lora.yaml`; the QLoRA fallback was deliberately unchanged.
+
+### Configuration and execution
+
+The run used `configs/session11_diagnostic.yaml` at SHA-256
+`cf9e1a38d0b03104c3c94513226ec17243653cc88c0fffe01306d9375e082a8c`,
+the pinned Qwen revision `f75b40e3da2003cdd6e1829b1f420ca70797c34e`,
+native Thinker PAD/BOS/EOS control rows 151643/151644/151645, BF16 LoRA rank
+16, constant learning rate 2e-4, batch size one, no accumulation, and exactly
+250 optimizer steps. Seeds were process/trainer 111, split/data 112, recorded
+window seed 113, and interruption 114. Span selection was deterministic by
+usable-turn score and did not consume the recorded window RNG.
+
+Hardware was one NVIDIA GeForce RTX 3090 with 24,576 MiB and driver 595.84.
+The software path was torch 2.10.0+cu126, Transformers 5.17.0, Accelerate
+1.15.0, PEFT 0.20.0, bitsandbytes 0.50.2, and SDPA. All 504 LoRA tensors
+(29,933,568 parameters) received nonzero gradients. Trainer runtime was
+152.9 seconds; total model-load, training, held-out evaluation, and trace
+runtime was 475.864 seconds. Peak allocated/reserved CUDA memory was exactly
+9,414,631,936/10,104,078,336 bytes (8.768/9.408 GiB). The mean of the first
+ten logged step losses was 6.7540 and the mean of the final nine step losses
+was 2.4462; every logged loss was finite.
+
+Commands:
+
+```bash
+PYTHONPATH=. .venv/bin/python scripts/run_session11_diagnostic.py --config configs/session11_diagnostic.yaml --prepare-only
+PYTHONPATH=. .venv/bin/python scripts/run_session11_diagnostic.py --config configs/session11_diagnostic.yaml
+```
+
+### Held-out internal metrics
+
+Teacher-forced weighted validation loss was 3.029406 with applied-weight
+denominator 777.45. Lexical-token loss was 8.797134 and perplexity 6,615.258
+over 181 text tokens. Counts were:
+
+| event | labels | predictions | precision | recall | F1 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| IDLE | 4,729 | 4,220 | 0.9687 | 0.8645 | 0.9136 |
+| START | 45 | 478 | 0.0544 | 0.5778 | 0.0994 |
+| STOP | 45 | 302 | 0.0795 | 0.5333 | 0.1383 |
+| text | 181 | 0 | n/a | n/a | n/a |
+
+The teacher-forced raw invalid-transition rate before grammar masking was
+719/5,000 = 0.1438. Twenty-seven of 45 target response turns received an
+ordinally matched predicted turn. Mean START absolute error was 5.556 frames
+(0.222 s, denominator 27); mean STOP error was 3.923 frames (0.157 s,
+denominator 26).
+
+Twenty free-streaming traces covered ten normal and ten synthetically
+interrupted 8-second spans. Over the 4,000 real-audio target frames, selected
+predictions were IDLE=3,565, text=419, START=11, and STOP=5, so IDLE was 89.1%
+rather than a near-total collapse. The raw pre-mask invalid-transition rate
+was 1,135/4,800 = 0.23646 across real audio and silent tails; the selected
+post-mask rate was 0/4,000. No-response was 10/20 = 0.50 and no-STOP was
+16/20 = 0.80. Synthetic-interruption STOP recall was 2/10 = 0.20, with mean
+latency 71 frames (2.84 s, denominator 2). Free boundary errors remained weak:
+START 33.3 frames (1.332 s, denominator 10) and STOP 34.25 frames (1.37 s,
+denominator 4).
+
+Representative public-safe trace observations:
+
+- Normal `data_stereo/691@0s` emitted START at frame 5, two lexical events at
+  frames 13–14, and STOP at frame 24; all transitions were legal.
+- Interrupted `data_stereo/654@0s` had synthetic onset frame 18. It emitted a
+  second active response at frame 10 and STOP at frame 42, a post-onset latency
+  of 24 frames (0.96 s).
+- Interrupted `data_stereo/442@0s` had onset frame 17 and emitted STOP at frame
+  135, a delayed but correct post-onset STOP.
+- Normal `data_stereo/10@8s` emitted 250 IDLE events including its silent tail,
+  documenting a no-response failure rather than hiding it.
+
+The gate passed because validation losses were finite, START and STOP counts
+were nonzero, aggregate free predictions did not collapse to near-total IDLE,
+the selected stream grammar was legal, at least 20 traces were inspected, and
+two synthetic interruptions received post-onset STOP events. Semantic quality
+was intentionally not an acceptance condition: teacher-forced lexical argmax
+count was zero, generated text was poor, raw grammar violations were frequent,
+and no-response/no-STOP rates were high. These are explicit limitations for a
+later main run, not reasons to reinterpret this sanity check as a quality
+result. The corrected local report is
+`outputs/session11-diagnostic/report.json`, SHA-256
+`9cc0d62365da18b9ea049ecc395adca8a9e199492871aec755f66ba8e17fe8a9`.

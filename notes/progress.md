@@ -612,3 +612,39 @@ git diff --check
 Stop boundary: Session 10 ends here. No Talker, audio generation, Hugging Face
 generation customization, benchmark, larger-data training, or production path
 was added.
+
+## Session 11 — internal validation metrics and small-data diagnostic
+
+SMALL_DATA_GATE=PASS
+
+Implemented padding-aware internal metrics for text/IDLE/START/STOP label and
+prediction counts; control precision, recall, and F1; raw pre-mask grammar
+violations; within-response START/STOP boundary error in frames and seconds;
+synthetic-interruption STOP recall and latency; teacher-forced lexical loss and
+perplexity; and free-streaming no-response/no-STOP rates. Undefined metrics use
+`null` with an explicit zero denominator. Eleven handcrafted metric tests were
+added.
+
+One weighted BF16-LoRA diagnostic ran for 250 steps on a fixed public
+100-conversation subset (80 train, 20 validation). Each 8-second selection span
+was four contiguous fixed 2-second/25 Hz chunks, preserving the chunk contract.
+The complete 25,000-frame histogram was printed before weight selection and
+showed 94.2% IDLE, so no unweighted run was needed. Public-data-derived weights
+`text=1.0`, `idle=0.05`, `start=4.0`, `stop=4.0` balanced aggregate weighted
+target mass and were used for the single diagnostic.
+
+All validation losses were finite; held-out teacher and free paths emitted
+START and STOP; free real-audio predictions were 89.1% IDLE; grammar-masked
+streams had zero invalid transitions; and two of ten synthetic-interruption
+traces emitted STOP after onset. Twenty validation traces were inspected across
+normal and interrupted inputs. High raw grammar violations, no-response and
+no-STOP rates, zero teacher-forced lexical argmaxes, and poor text remain
+explicit small-data limitations. Exact configs, seeds, IDs/manifest, runtime,
+VRAM, denominated metrics, and representative traces are recorded in
+`notes/experiments.md` and `notes/session11_subset.yaml`.
+
+The evidenced weights and 8-second/four-chunk selection span were promoted only
+to `configs/train_lora.yaml`. No main run, QLoRA run, Talker, audio generation,
+benchmark, or production work was performed.
+
+Stop boundary: Session 11 ends here.
