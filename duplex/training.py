@@ -150,6 +150,21 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
     if data.get("dataset") != DATASET_VIEW or data.get("synthetic_interruption") is not True:
         raise ValueError("Training data must be DailyTalkContiguous with synthetic interruption.")
 
+    span_seconds = data.get("contiguous_span_seconds")
+    if span_seconds is not None:
+        chunks_per_span = data.get("chunks_per_span")
+        if (
+            isinstance(span_seconds, bool)
+            or not isinstance(span_seconds, int)
+            or not 8 <= span_seconds <= 12
+            or span_seconds % 2
+            or chunks_per_span != span_seconds // 2
+        ):
+            raise ValueError(
+                "data.contiguous_span_seconds must be an even integer from 8 to 12, "
+                "with chunks_per_span equal to span_seconds / 2."
+            )
+
     selected_windows = data.get("selected_windows")
     if selected_windows is not None:
         if data.get("synthetic_smoke", False):
@@ -617,12 +632,30 @@ def build_datasets_and_collator(
                 speaker_label_map=label_map,
             )
             item_seed = _stable_item_seed(training["window_seed"], entry.conversation_id)
-            windows = sample_window_metadata(
-                record,
-                random_count=int(data.get("random_windows_per_conversation", 1)),
-                seed=item_seed,
-                include_boundaries=bool(data.get("include_boundary_windows", True)),
-            )
+            span_seconds = data.get("contiguous_span_seconds")
+            if span_seconds is None:
+                windows = sample_window_metadata(
+                    record,
+                    random_count=int(data.get("random_windows_per_conversation", 1)),
+                    seed=item_seed,
+                    include_boundaries=bool(data.get("include_boundary_windows", True)),
+                )
+            else:
+                if record.duration_seconds < span_seconds:
+                    continue
+                rng = random.Random(item_seed)
+                maximum_start = record.duration_seconds - span_seconds
+                span_start = rng.uniform(0.0, maximum_start) if maximum_start else 0.0
+                windows = tuple(
+                    WindowMetadata(
+                        conversation_id=record.conversation_id,
+                        split=split,
+                        start_seconds=span_start + 2.0 * chunk_index,
+                        end_seconds=span_start + 2.0 * (chunk_index + 1),
+                        kind=WindowKind.RANDOM,
+                    )
+                    for chunk_index in range(int(data["chunks_per_span"]))
+                )
             destination = train_values if split is Split.TRAIN else eval_values
             destination.extend(TimelineSample(record, replace(window, split=split)) for window in windows)
         max_train = data.get("max_train_samples")

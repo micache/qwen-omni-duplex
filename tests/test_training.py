@@ -82,6 +82,7 @@ def test_trainable_allowlist_accepts_only_targeted_lora_parameters() -> None:
         ("train_lora.yaml", "lora", False, "LoRA"),
         ("train_qlora_16gb.yaml", "qlora", True, "QLoRA"),
         ("debug.yaml", "lora", False, "LoRA"),
+        ("session11_diagnostic.yaml", "lora", False, "LoRA"),
     ],
 )
 def test_checked_in_training_configs_are_explicit(
@@ -95,6 +96,22 @@ def test_checked_in_training_configs_are_explicit(
     assert config["model"]["load_in_4bit"] is load_in_4bit
     assert config["lora"]["rank"] == 16
     assert config["training"]["auto_find_batch_size"] is False
+
+
+def test_session11_evidence_is_promoted_only_to_main_lora_config() -> None:
+    root = Path(__file__).parents[1] / "configs"
+    lora = load_training_config(root / "train_lora.yaml")
+    qlora = load_training_config(root / "train_qlora_16gb.yaml")
+
+    assert lora["data"]["contiguous_span_seconds"] == 8
+    assert lora["data"]["chunks_per_span"] == 4
+    assert lora["loss_weights"] == {
+        "text": 1.0,
+        "idle": 0.05,
+        "start": 4.0,
+        "stop": 4.0,
+    }
+    assert "contiguous_span_seconds" not in qlora["data"]
 
 
 def test_qlora_cannot_be_activated_by_lora_config() -> None:

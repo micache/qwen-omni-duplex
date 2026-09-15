@@ -9,6 +9,7 @@ timeline:
   chunk_seconds: 2.0
   frame_rate_hz: 25
   control_events: [IDLE, START, STOP]
+  control_token_source: thinker_native
 
 task:
   fusion: additive_audio_text_control
@@ -17,17 +18,15 @@ task:
 
 data:
   dataset: DailyTalkContiguous
-  root: /path/to/DailyTalkContiguous
+  root: /workspace/data/DailyTalkContiguous-session09
   manifest: dailytalk.jsonl
+  dataset_revision: 33e1b501f725a6f4ed4ded95e16cd7f66b9d4bdc
   synthetic_interruption: true
-  interruption_probability: 0.5
+  synthetic_smoke: false
+  interruption_probability: 0.0
   min_assistant_frames: 4
-  contiguous_span_seconds: 8
-  chunks_per_span: 4
   speaker_label_map:
     SPEAKER_MAIN: assistant
-  max_train_samples: null
-  max_eval_samples: null
 
 loss_weights:
   text: 1.0
@@ -44,34 +43,52 @@ lora:
 training:
   method: lora
   run_label: LoRA
-  output_dir: outputs/session08-lora
-  max_steps: 1000
+  output_dir: outputs/session11-diagnostic
+  max_steps: 250
   batch_size: 1
   eval_batch_size: 1
-  gradient_accumulation_steps: 16
+  gradient_accumulation_steps: 1
   learning_rate: 2.0e-4
-  lr_scheduler_type: cosine
+  lr_scheduler_type: constant
   weight_decay: 0.0
-  warmup_steps: 50
+  warmup_steps: 0
   max_grad_norm: 1.0
   bf16: true
   gradient_checkpointing: true
-  eval_strategy: steps
-  eval_steps: 50
-  save_strategy: steps
-  save_steps: 50
-  save_total_limit: 2
+  eval_strategy: "no"
+  eval_steps: null
+  save_strategy: "no"
+  save_steps: 250
+  save_total_limit: 1
   optimizer: adamw_torch
   dataloader_num_workers: 0
   auto_find_batch_size: false
   full_determinism: false
-  seed: 17
-  split_seed: 18
-  window_seed: 19
-  interruption_seed: 20
+  seed: 111
+  split_seed: 112
+  window_seed: 113
+  interruption_seed: 114
   resume_from_checkpoint: null
 
+diagnostic:
+  subset_conversations: 100
+  train_conversations: 80
+  validation_conversations: 20
+  span_seconds: 8
+  chunks_per_span: 4
+  validation_traces: 20
+  normal_traces: 10
+  interruption_traces: 10
+  subset_manifest: outputs/session11-diagnostic/subset_manifest.json
+  report: outputs/session11-diagnostic/report.json
+  trace_directory: outputs/session11-diagnostic/traces
+  vad_frame_seconds: 0.04
+  vad_floor_rms: 0.005
+  vad_peak_fraction: 0.10
+  vad_merge_gap_frames: 2
+  vad_min_active_frames: 2
+
 logging:
-  backends: [jsonl, tensorboard]
+  backends: [jsonl]
   steps: 1
   disable_tqdm: false
