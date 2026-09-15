@@ -649,6 +649,7 @@ benchmark, or production work was performed.
 
 Stop boundary: Session 11 ends here.
 
+
 ## Session 12 — VoiceBench paired text-output adaptation
 
 Status: implementation, fake-model validation, and bounded GPU smoke complete.
@@ -801,3 +802,29 @@ tests/test_benchmarks.py` passed with 35 tests; the full suite passed with 122
 tests and 5 opt-in skips. Compilation, CLI help, and `git diff --check` passed.
 
 Stop boundary: Session 14 ends here; no full-data benchmark run was launched.
+
+## Session 15 — controlled main BF16-LoRA checkpoint
+
+MAIN_CHECKPOINT_READY=FAIL
+
+The prerequisite gates remained `OVERFIT_GATE=PASS` and `SMALL_DATA_GATE=PASS`.
+One frozen 800-step BF16-LoRA run trained on 300 public train conversations and
+20 disjoint validation conversations, selected as deterministic 8-second spans
+of four fixed 2-second/25-Hz chunks. Evaluation, representative traces, and
+rolling adapter checkpoints were saved every 100 steps. The public manifest,
+subset selection, config, base revision, and dependency versions were frozen
+beside `outputs/session15-main-111b/` before launch. No hyperparameter sweep or
+benchmark judging was started.
+
+Validation selected step 600 rather than the last or lowest training-loss step.
+Its teacher-forced lexical loss was 6.462, weighted loss 2.190, and START/STOP
+F1 values were 0.146/0.116. Fixed free traces recalled one of three synthetic
+interruption STOPs but predicted 97.8% IDLE and only two lexical events across
+1,200 real-audio frames. Fresh-process adapter loading passed. The three frozen
+greedy system-prompt probes produced zero text and repeated premature
+START/STOP cycles, including a STOP after interruption onset without a sustained
+active response. The selected adapter is retained as experiment evidence, but
+it is not a ready main checkpoint. Exact commands, hashes, metrics, and failures
+are in `notes/experiments.md`.
+
+Stop boundary: Session 15 ends here. No benchmark judging was started.

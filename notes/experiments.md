@@ -312,3 +312,115 @@ later main run, not reasons to reinterpret this sanity check as a quality
 result. The corrected local report is
 `outputs/session11-diagnostic/report.json`, SHA-256
 `9cc0d62365da18b9ea049ecc395adca8a9e199492871aec755f66ba8e17fe8a9`.
+
+## 2026-09-15 — Session 15 controlled main BF16-LoRA run
+
+Status: **MAIN_CHECKPOINT_READY=FAIL**. Prerequisites were the recorded
+`OVERFIT_GATE=PASS` and `SMALL_DATA_GATE=PASS`. This was one controlled main
+run, with no sweep and no benchmark judging. The local RTX 3090 had 24,576 MiB
+VRAM, driver 595.84, and was idle at preflight. The workspace had 47 GB free
+before the run; the local public DailyTalk snapshot occupied 13 GB. Git was
+clean at the start, on `master` at `671558d35d1e59fc38683158a580f50e6af76a32`.
+No model or dataset was downloaded in this session.
+
+An initial preparation under `outputs/session15-main-111/` requested 300 train
+and 50 validation conversations, but the deterministic split had only 23
+eligible validation conversations. That directory contains only its frozen
+config and freeze metadata. No model load or training occurred there. A new
+run ID, `session15-main-111b`, used the same train quota and 20 validation
+conversations under the same split seed; the failed directory was not reused
+or overwritten.
+
+### Frozen inputs and exact commands
+
+The resolved config is `outputs/session15-main-111b/resolved_config.yaml`,
+identical to `configs/session15_main.yaml`, SHA-256
+`5ee5f025cf329ed62ac41ad856bb4f97d373e0c324b7097c23c8d6e36e350897`.
+The freeze record is `outputs/session15-main-111b/freeze.json`. Base Thinker
+revision was `f75b40e3da2003cdd6e1829b1f420ca70797c34e`; public data
+revision was `33e1b501f725a6f4ed4ded95e16cd7f66b9d4bdc`. The source
+JSONL manifest SHA-256 was
+`e00c5d5aec839a46181b4a680242f43733b5e73d3b7e2ef023140bf0f6b9a49f`.
+The selected 320-conversation manifest SHA-256 was
+`0c121500c9e43c4fd99c86647ec9e992127b0abf0d5e67ebd80c3ab7a71afe39`.
+All IDs were unique and train/validation conversation sets were disjoint under
+split salt `DailyTalkContiguous-session11-115`. Four normal fixed chunks and
+one deterministic interrupted chunk per conversation yielded 1,500 train and
+100 validation timeline examples. The complete 80,000-frame histogram was
+IDLE=75,389, text=3,123, START=744, STOP=744, padding=0. Each selected span
+was 8 seconds, four contiguous 2-second chunks at 25 Hz. The one interrupted
+duplicate in five examples implements a fixed 0.2 interruption fraction; cuts
+used interruption seed 114 and minimum four assistant frames. Window seed 113
+was recorded; span selection was deterministic by usable-turn score. Process
+seed 111 and split seed 115 were fixed.
+
+Weights were text=1, IDLE=0.05, START=4, STOP=4. Native Thinker control rows
+were PAD/BOS/EOS 151643/151644/151645. BF16 LoRA used rank 16, alpha 32,
+dropout 0.05, and the seven decoder projections
+`q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj` (252 exact targets).
+Optimizer was `adamw_torch`, batch size 1, accumulation 1, constant 2e-4,
+zero warmup/weight decay, max gradient norm 1, non-reentrant gradient
+checkpointing, and 800 steps. Evaluation and rolling checkpoints were at every
+100 steps; `save_total_limit=2`. Generation was greedy with the frozen
+"You are a concise spoken-dialogue assistant." system prompt, no sampling,
+temperature 1, no top-k, and one silent-tail chunk. Internal training
+validation used empty context, as in Session 11; the separate fresh-process
+checks used the frozen generation prompt. This context difference is a known
+validation limitation.
+
+The dependency freeze recorded torch 2.10.0+cu126, Transformers 5.17.0,
+Accelerate 1.15.0, PEFT 0.20.0, bitsandbytes 0.50.2, datasets 5.0.1,
+huggingface_hub 1.31.0, PyYAML 6.0.3, SoundFile 0.14.0, SciPy 1.17.1, and
+NumPy 2.4.6. Training runner SHA-256 was
+`9d69dc20e6545f0da21d6d5400f4290d290b5c2e75836a80d3dce795181b8c92`.
+
+```bash
+PYTHONPATH=. .venv/bin/python scripts/run_session15_main.py --config configs/session15_main.yaml --prepare-only > outputs/session15b-prepare.log 2>&1
+PYTHONPATH=. .venv/bin/python scripts/run_session15_main.py --config configs/session15_main.yaml > outputs/session15b-train.log 2>&1
+PYTHONPATH=. .venv/bin/python scripts/verify_session15_adapter.py > outputs/session15b-fresh-verify.log 2>&1
+```
+
+### Checkpoint selection and limitations
+
+The full load/training/validation runtime was 1,211.132 seconds (20 min 11 s),
+800 optimizer steps, about 0.66 steps/s including fixed evaluations and trace
+decoding. Peak allocated/reserved CUDA memory was
+9,414,631,936/10,158,604,288 bytes (8.77/9.46 GiB). Learning rate stayed at
+2e-4; logged total and group losses were finite. Step 200's six free traces
+were all IDLE, but step 300 recovered to 75.8% IDLE, so the persistent-IDLE
+abort rule did not trigger. There were no NaN, zero aggregate START/STOP labels,
+data leakage, or alignment assertions.
+
+Eight validation reports and fixed normal/interrupted traces are under
+`outputs/session15-main-111b/validation/` and `traces/`. The selection score
+combined teacher-forced lexical loss with START/STOP F1, interruption STOP
+recall, and weighted loss. Step 600 beat step 800 and all earlier candidates:
+its lexical loss was 6.462247 over 181 text targets, weighted loss was
+2.190343, and teacher-forced START/STOP F1 were 0.146154/0.115502 over 43
+labels each. Their recalls were both 38/43=0.8837, but precision was weak
+(38/477 START, 38/615 STOP). Teacher-forced START and STOP absolute boundary
+errors were each 4.795 frames (0.192 s; 39 matched turns); raw invalid-state
+argmax rate was 985/5,000=0.197. In six selected free traces, real-audio
+predictions were IDLE=1,174, START=12, STOP=12, text=2 over 1,200 frames;
+no-response and no-STOP were both 2/6. Synthetic interruption STOP recall was
+1/3 with 16-frame (0.64 s) latency in the recalled case. Free START/STOP
+boundary errors were 33/48.33 frames; raw grammar violation rate was
+224/1,300, while selected transitions were legal. Step 800 emitted 99.5% IDLE
+and had no post-onset STOP among the three interruptions. The selected PEFT
+safetensors digest is
+`6c9d507c23f4bb251bac11d4bf16bc9a1f9f0546e6bb9ba115d8c97f7b09c01e`.
+`outputs/session15-main-111b/selected/` contains only the adapter and project
+metadata, with no redistributed Qwen base weights.
+
+Fresh-process loading of that adapter passed. The three cases and full traces
+are in `outputs/session15-main-111b/fresh_verify/report.json`. With the frozen
+system prompt, the wait case emitted 11 START and 11 STOP events, including
+START at frame 11 before its first user activity at 5.44 seconds; it did not
+wait reliably. The completed-turn case emitted 25 START and 25 STOP events,
+beginning with START at frame 0 before the first observed user activity at
+2.76 seconds; it did not start at a clean turn boundary. The interrupted case
+had synthetic onset at frame 171 and emitted 28 START and 28 STOP events;
+START/STOP cycles at frames 177–180 and 186–187 included post-onset STOP but
+no sustained response to interrupt. All three emitted zero lexical events and
+zero text. These failures outweigh the improvement in teacher-forced loss;
+step 600 is the selected experiment adapter, but **MAIN_CHECKPOINT_READY=FAIL**.
