@@ -709,3 +709,62 @@ git diff --check
 Stop boundary: Session 12 ends here. No full VoiceBench run, external judge,
 score claim, Talker/audio generation, or production benchmark service was
 added or run.
+
+## Session 13 — Full-Duplex-Bench v1.0 text-timeline adaptation
+
+Status: v1.0 implementation and local handcrafted validation complete. v1.5
+was not implemented. No full benchmark, benchmark-data download, speech
+generation, VAD, TTS, or paid judge call was performed.
+
+Implemented:
+
+- A caller-owned directory loader for the four v1.0 task layouts, with
+  base/duplex model modes and bounded sample selection. Benchmark data is never
+  copied into the repository.
+- Duplex evaluation directly from the fixed-two-second streaming event trace.
+  Base evaluation uses manual streamed half-duplex Thinker generation that
+  begins only after the complete input is available and records measured token
+  availability rather than assigning synthetic speech times.
+- Exact decoded-text preservation and word alignment from contributing lexical
+  tokens. The result schema separately records logical and causal availability
+  for words, first/last word, every START/STOP, and multiple response segments.
+- Named, fixed v1.0 silence/backchannel/takeover thresholds and 200 ms ICC bins,
+  with source comments. Pause handling TOR; backchannel TOR, conditional
+  frequency, and timing JSD; smooth-turn TOR and annotated-end first-word
+  latency; and interruption TOR, post-interruption first-word latency, and an
+  unevaluated judge-ready relevance record are emitted.
+- `null` for missing responses and undefined conditional latency/JSD/frequency,
+  with explicit aggregate coverage. Every record, run, summary, and judge
+  record is labeled `Full-Duplex-Bench v1.0 text-timeline adaptation`.
+- Handcrafted trace tests covering silence, a two-word subsecond backchannel,
+  takeover boundaries, multiple response segments, negative logical versus
+  nonnegative causal latency, first/last word and START/STOP timing, missing
+  response coverage, 200 ms JSD bins, post-interruption timing versus
+  pre-interruption text, judge deferral, and base/duplex routing.
+
+The public `DanielLin94144/Full-Duplex-Bench` `main` branch was verified on
+2026-09-15 at `3e799c45a045256f47d5f1c9cda90157e2d2ec9e`. The root README,
+`v1_v1.5/README.md`, evaluation README, v1.0 paper, and the pause,
+backchannel, smooth-turn, interruption, dispatcher, and timing evaluation
+scripts were inspected from a temporary revision-pinned checkout. Nothing was
+vendored.
+
+Validation commands run:
+
+~~~bash
+git ls-remote https://github.com/DanielLin94144/Full-Duplex-Bench.git refs/heads/main
+.venv/bin/python -m pytest -q tests/test_benchmarks.py
+.venv/bin/python -m pytest -q
+.venv/bin/python -m compileall -q duplex benchmarks scripts train.py generate.py tests
+.venv/bin/python benchmarks/full_duplex_bench.py --help
+git diff --check
+~~~
+
+The focused benchmark tests passed (23 tests). The full suite passed with 110
+tests and 5 opt-in skips. No user-supplied Full-Duplex-Bench task directory was
+present under `/workspace`, `/data`, `/datasets`, or `/mnt/data`, so the
+requested one-sample-per-task model smoke was not run. No data or model was
+downloaded to manufacture that smoke.
+
+Stop boundary: Session 13 ends here. Full-Duplex-Bench v1.5 and any full-data
+run remain unimplemented/unrun.

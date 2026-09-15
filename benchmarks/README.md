@@ -57,5 +57,31 @@ command before `evaluate.py`; pytest never executes either command. Smoke
 outputs must only be checked for nonempty compatible JSONL and must not be
 interpreted as scores.
 
-Full-Duplex-Bench remains a **text-timeline adaptation**, not an official
-speech-output score.
+## Full-Duplex-Bench Session 13 v1.0 adaptation
+
+`full_duplex_bench.py` implements only the four v1.0 tasks as a
+**Full-Duplex-Bench v1.0 text-timeline adaptation**. It was inspected against
+the public v1/v1.5 READMEs, v1.0 paper, and v1.0 evaluators at upstream revision
+`3e799c45a045256f47d5f1c9cda90157e2d2ec9e`. No upstream data or code is
+vendored. Supply a local v1.0 data directory explicitly:
+
+~~~bash
+.venv/bin/python benchmarks/full_duplex_bench.py \
+  --model-mode duplex \
+  --adapter outputs/session11-diagnostic/final \
+  --data-dir /path/to/data-full-duplex-bench/v1_0 \
+  --task smooth_turn_taking \
+  --limit 1 \
+  --output outputs/full-duplex-bench/smooth-duplex.json
+~~~
+
+For backchannel JSD, also pass the caller-owned upstream
+`icc_gt_distribution.json` with `--ground-truth-distribution`. Duplex mode
+consumes the native event trace. Base mode uses manual streamed generation only
+after the entire input is available and retains measured token availability
+times. Results preserve exact decoded text and separately expose lexical word,
+START, STOP, logical, and causal-availability timing. The runner does not use
+TTS/VAD, synthesize speech, or call the interruption relevance judge. Missing
+conditional metrics are `null` with coverage. v1.5 is not implemented.
+
+This remains a text-timeline adaptation, not an official speech-output score.
