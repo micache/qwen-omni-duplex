@@ -648,3 +648,64 @@ to `configs/train_lora.yaml`. No main run, QLoRA run, Talker, audio generation,
 benchmark, or production work was performed.
 
 Stop boundary: Session 11 ends here.
+
+## Session 12 — VoiceBench paired text-output adaptation
+
+Status: implementation, fake-model validation, and bounded GPU smoke complete.
+No full benchmark or external judge was run.
+
+Implemented:
+
+- One CLI for `hlt-lab/voicebench` with base/duplex modes, adapter-only
+  checkpoint selection, audio/text modalities, subset/split selection, stable
+  resume IDs, bounded index ranges, deterministic seeding, and shared greedy
+  decoding settings.
+- Upstream-compatible JSONL that preserves all non-audio dataset fields and
+  adds `response`, a namespaced stable ID, and a compact manifest containing
+  the exact base revision, adapter digest, BF16 dtype, seed, prompt, decoding
+  parameters, hardware, timing mode, and pinned VoiceBench revision.
+- Untouched base Qwen loading with Talker disabled and direct official Thinker
+  audio-to-text generation; adapter-active ordinary Qwen text generation; and
+  explicit fixed-two-second duplex audio streaming with silent tails until
+  STOP or the configured bound.
+- A paired summarizer that rejects duplicate/missing IDs, mixed manifests, and
+  paired-setting drift, then prepares the pinned upstream judge/evaluator
+  commands without executing them.
+
+The official VoiceBench `main` branch was verified on 2026-09-15 as
+`6992cf4fc51d0426c52c4805b5002e0aae49118a`. Its README, `main.py`,
+`api_judge.py`, `evaluate.py`, evaluator mapping, and Qwen Omni adapter were
+inspected from a temporary shallow clone; no upstream code was vendored.
+
+The real smoke used VoiceBench `alpacaeval/test` indices 0 and 1, seed 17, the
+shared upstream system prompt, greedy decoding, and a 64-token visible-response
+cap on an NVIDIA GeForce RTX 3090. Base mode and duplex mode each wrote two
+unique, paired, nonempty compatible JSONL records. Duplex used the Session 09
+final adapter because a first bounded attempt with the Session 11 diagnostic
+adapter legally emitted no response on index 0 and was rejected before writing
+a record. This is only an execution/schema check; no two-sample score is
+computed or interpreted.
+
+Datasets 5 required optional `torchcodec` for its decoded Audio feature. The
+runner instead requests encoded dataset audio and decodes/resamples through
+the repository's already pinned SoundFile/SciPy stack. Transformers 5.17's
+parent Omni `generate()` dereferenced its deleted Talker after
+`disable_talker()`; base mode therefore calls the parent's official
+`thinker.generate()` audio-to-text stage directly.
+
+Validation commands run:
+
+~~~bash
+git ls-remote https://github.com/MatthewCYM/VoiceBench.git refs/heads/main
+.venv/bin/python -m pytest -q tests/test_benchmarks.py
+.venv/bin/python -m compileall -q benchmarks tests/test_benchmarks.py
+.venv/bin/python benchmarks/voicebench.py --help
+.venv/bin/python benchmarks/voicebench.py run --model-mode base --data alpacaeval --split test --modality audio --limit 2 --start-index 0 --seed 17 --max-new-tokens 64 --output outputs/session12-voicebench/base-final-alpacaeval-test-audio.jsonl
+.venv/bin/python benchmarks/voicebench.py run --model-mode duplex --adapter outputs/session09-overfit-native/final --data alpacaeval --split test --modality audio --limit 2 --start-index 0 --seed 17 --max-new-tokens 64 --output outputs/session12-voicebench/duplex-final-v2-alpacaeval-test-audio.jsonl
+.venv/bin/python benchmarks/voicebench.py summarize --base outputs/session12-voicebench/base-final-alpacaeval-test-audio.jsonl --duplex outputs/session12-voicebench/duplex-final-v2-alpacaeval-test-audio.jsonl --upstream-dir /tmp/voicebench-session12 --output outputs/session12-voicebench/alpacaeval-test-audio-final-pair.json
+git diff --check
+~~~
+
+Stop boundary: Session 12 ends here. No full VoiceBench run, external judge,
+score claim, Talker/audio generation, or production benchmark service was
+added or run.
