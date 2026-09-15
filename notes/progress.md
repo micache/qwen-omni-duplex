@@ -532,3 +532,83 @@ run, diagnosis, fix, and compact numeric results are recorded in
 `outputs/session09-overfit-native/` and remain gitignored.
 
 Stop boundary: Session 09 ends here.
+
+## Session 10 — explicit full-duplex streaming generation
+
+Status: implementation, scripted validation, and real-checkpoint smoke complete.
+The prerequisite remains **OVERFIT_GATE=PASS**. On this new machine the exact
+Session 09 four-window run was reproduced for 150 optimizer steps and again
+printed `OVERFIT_GATE=PASS`; no larger-data training was started.
+
+Implemented:
+
+- An explicit Thinker loop that prefills system/text context once, encodes each
+  fixed two-second mono 16 kHz chunk through the Qwen audio tower exactly once,
+  restores and validates approximately 50 features for a full chunk, and feeds
+  those features one at a time through the original text decoder with a growing
+  KV cache. Hugging Face `generate()` is not used or customized.
+- Final-chunk zero padding with an explicit valid-sample mask. Only valid audio
+  reaches feature extraction, while every feature from one chunk becomes
+  available together at that chunk's end. Trace validation requires
+  `available_time_s >= chunk_end_time_s`.
+- Additive audio/text/control inputs in which the current step receives only
+  the prior predicted event after the initial context boundary. Session 02
+  inactive/active grammar masking is applied before greedy or optional sampled
+  selection, with both the raw argmax and whether masking changed it retained.
+- Hidden IDLE/START/STOP events, exact cleanup-disabled decoding of the full
+  lexical-token sequence, stable per-event decoded deltas for incomplete
+  Unicode/BPE pieces, word spans derived from lexical token events, and the
+  individual contributing token times rather than timestamps spread uniformly
+  over the final string.
+- Silent two-second tail chunks until a legal STOP or the configured limit,
+  retained lexical hidden states, and no Talker invocation. Every event JSONL
+  record contains sample/chunk/frame identity, audio and availability times,
+  per-step compute time, selected and raw IDs, event type, decoded delta,
+  state transition, grammar-mask diagnosis, chunk end, and silent-tail status.
+- A generation CLI for strict mono 16 kHz WAV input, pinned base/adapted model
+  loading, system/text context, greedy or sampled selection, JSON summary, and
+  JSONL trace output.
+
+Scripted tests cover wait/START/text/IDLE/STOP, illegal raw argmaxes in both
+inactive and active states, interruption while active, final padding, silent
+tail termination, one audio-tower call per chunk, exact KV-cache growth,
+chunk-boundary causality, Unicode/subword reconstruction, token-based word
+grouping, and timeout without STOP. The full suite passed with 75 tests and five
+expected opt-in/cache-dependent skips.
+
+The pinned base checkpoint and DailyTalk snapshot were absent and were
+downloaded at revisions `f75b40e3da2003cdd6e1829b1f420ca70797c34e` and
+`33e1b501f725a6f4ed4ded95e16cd7f66b9d4bdc`, respectively. Full-dataset
+validation remains strict and reported the upstream invalid zero/negative span
+at `data_stereo/4.json` alignment 56; the four configured Session 09 samples
+loaded and reproduced the gate without changing that validator.
+
+The final real smoke used the freshly reproduced adapter, a two-second silent
+mono 16 kHz input, greedy decoding, the default system context, and one allowed
+silent chunk on an NVIDIA GeForce RTX 3090 (24,576 MiB, driver 595.84). It made
+one audio-tower call per processed chunk, emitted 56 event records, changed 16
+illegal raw argmaxes through grammar masking, retained 27 lexical hidden
+states, and reached STOP at silent-tail frame 5 (`available_time_s=4.0`). All
+56 availability times were at or after their source chunk end. This bounded
+smoke establishes execution and causality only; the tiny four-window adapter's
+visible text under a new system-prefill/silence context is not a quality result.
+The trace and summary are saved locally under the gitignored
+`outputs/session10-smoke/adapter-trace.jsonl` and `adapter-summary.json`.
+
+Commands run:
+
+```bash
+uv python install 3.11.16
+uv venv --python 3.11.16 --clear .venv
+UV_CACHE_DIR=/tmp/qwen-duplex-uv-cache uv pip install --python .venv/bin/python --index-strategy unsafe-best-match -r requirements.txt
+.venv/bin/python scripts/prepare_dailytalk.py --dataset-root /workspace/data/DailyTalkContiguous-session09 --output outputs/session10-smoke/dailytalk-index.jsonl --download --revision 33e1b501f725a6f4ed4ded95e16cd7f66b9d4bdc
+.venv/bin/python train.py --config configs/debug.yaml
+.venv/bin/python generate.py --config configs/debug.yaml --audio outputs/session10-smoke/silence-2s.wav --trace outputs/session10-smoke/adapter-trace.jsonl --sample-id session10-real-adapter-smoke --max-silent-chunks 1
+.venv/bin/python -m pytest -q
+.venv/bin/python -m compileall -q duplex benchmarks scripts train.py generate.py tests
+git diff --check
+```
+
+Stop boundary: Session 10 ends here. No Talker, audio generation, Hugging Face
+generation customization, benchmark, larger-data training, or production path
+was added.
