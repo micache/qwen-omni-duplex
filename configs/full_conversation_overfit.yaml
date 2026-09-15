@@ -1,0 +1,100 @@
+model:
+  name: Qwen/Qwen2.5-Omni-3B
+  revision: f75b40e3da2003cdd6e1829b1f420ca70797c34e
+  component: thinker
+  local_files_only: true
+  load_in_4bit: false
+timeline:
+  chunk_seconds: 2.0
+  frame_rate_hz: 25
+  control_events:
+  - IDLE
+  - START
+  - STOP
+  control_token_source: thinker_native
+task:
+  fusion: additive_audio_text_control
+  objective: weighted_next_event
+  output: text_only
+data:
+  dataset: DailyTalkContiguous
+  root: /workspace/data/DailyTalkContiguous-session09
+  manifest: dailytalk.jsonl
+  dataset_revision: 33e1b501f725a6f4ed4ded95e16cd7f66b9d4bdc
+  source_manifest_sha256: e00c5d5aec839a46181b4a680242f43733b5e73d3b7e2ef023140bf0f6b9a49f
+  synthetic_interruption: true
+  synthetic_smoke: false
+  complete_conversations: true
+  overfit_subset: true
+  interruption_probability: 0.2
+  min_assistant_frames: 4
+  speaker_label_map:
+    SPEAKER_MAIN: assistant
+loss_weights:
+  text: 1.0
+  idle: 1.0
+  start: 1.0
+  stop: 1.0
+loss_weight_max_ratio: 5.0
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  target_projections:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+training:
+  method: lora
+  run_label: LoRA
+  output_dir: outputs/full-conversation-overfit-111
+  max_steps: 200
+  batch_size: 1
+  eval_batch_size: 1
+  gradient_accumulation_steps: 1
+  learning_rate: 0.0002
+  lr_scheduler_type: constant
+  weight_decay: 0.0
+  warmup_steps: 0
+  max_grad_norm: 1.0
+  bf16: true
+  gradient_checkpointing: true
+  eval_strategy: 'no'
+  eval_steps: null
+  save_strategy: 'no'
+  save_steps: null
+  save_total_limit: 2
+  optimizer: adamw_torch
+  dataloader_num_workers: 0
+  auto_find_batch_size: false
+  full_determinism: false
+  seed: 111
+  split_seed: 115
+  window_seed: 113
+  interruption_seed: 114
+  resume_from_checkpoint: null
+diagnostic:
+  validation_traces: 6
+  report: outputs/full-conversation-overfit-111/report.json
+  trace_directory: outputs/full-conversation-overfit-111/traces
+  vad_frame_seconds: 0.04
+  vad_floor_rms: 0.005
+  vad_peak_fraction: 0.1
+  vad_merge_gap_frames: 2
+  vad_min_active_frames: 2
+generation:
+  decoding: greedy
+  system: You are a concise spoken-dialogue assistant.
+  max_silent_chunks: 1
+  temperature: 1.0
+  top_k: null
+  sample: false
+logging:
+  backends:
+  - jsonl
+  steps: 10
+  disable_tqdm: true

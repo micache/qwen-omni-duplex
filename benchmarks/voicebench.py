@@ -1,4 +1,4 @@
-"""Text-output VoiceBench runner and paired-result summarizer."""
+"""Session 12 text-output VoiceBench runner and paired-result summarizer."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ class RunSettings:
         if self.max_new_tokens <= 0 or self.max_silent_chunks < 0:
             raise ValueError("Generation limits are invalid.")
         if self.dtype != "bfloat16":
-            raise ValueError("This runner supports only bfloat16.")
+            raise ValueError("Session 12 supports only bfloat16.")
         if self.model_mode == "duplex" and self.adapter is None:
             raise ValueError("Duplex mode requires --checkpoint or --adapter.")
         if self.model_mode == "base" and self.adapter is not None:
@@ -222,12 +222,12 @@ class DuplexQwenBackend:
     """Adapter-active ordinary text path and explicit two-second audio path."""
 
     def __init__(self, settings: RunSettings) -> None:
-        from duplex.training import build_training_model, load_adapter_weights, load_training_config
+        from duplex.training import _load_adapter_weights, build_training_model, load_training_config
         assert settings.adapter is not None
         config = load_training_config(settings.adapter / "training_config.yaml")
         config["model"]["local_files_only"] = not settings.allow_download
         self.model, self.processor, _ = build_training_model(config)
-        load_adapter_weights(self.model, settings.adapter)
+        _load_adapter_weights(self.model, settings.adapter)
         self.model.eval()
         self.settings = settings
 
@@ -363,7 +363,7 @@ def _read_records(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any]
         record = json.loads(line)
         example_id, current = record.get(ID_FIELD), record.get(MANIFEST_FIELD)
         if not isinstance(example_id, str) or not isinstance(current, dict):
-            raise ValueError(f"Invalid benchmark result schema in {path}:{number}.")
+            raise ValueError(f"Invalid Session 12 schema in {path}:{number}.")
         if example_id in records:
             raise ValueError(f"Duplicate {ID_FIELD} {example_id!r} in {path}.")
         if manifest is not None and current != manifest:
