@@ -8,6 +8,16 @@ hardware, data snapshot, exact command, result, and interpretation. Adapted
 Full-Duplex-Bench results must be labeled “text-timeline adaptation,” never as
 official speech-output scores.
 
+## 2026-09-15 — Session 14 v1.5 evaluator correctness
+
+Handcrafted token/control traces and temporary paired WAVs exercised the four
+v1.5 overlap scenarios. This was evaluator correctness validation, with no
+model weights, external dataset, semantic API call, or benchmark score. The
+focused command was `.venv/bin/python -m pytest -q
+tests/test_full_duplex_v15.py tests/test_benchmarks.py`; 35 tests passed. Paper
+timing equations were adapted to causal lexical availability and kept distinct
+from internal predicted STOP timing. No full-data experiment was run.
+
 ## 2026-09-11 — Session 05 synthetic inspection
 
 This was a local correctness inspection, not a model experiment. A two-second,

@@ -82,6 +82,45 @@ after the entire input is available and retains measured token availability
 times. Results preserve exact decoded text and separately expose lexical word,
 START, STOP, logical, and causal-availability timing. The runner does not use
 TTS/VAD, synthesize speech, or call the interruption relevance judge. Missing
-conditional metrics are `null` with coverage. v1.5 is not implemented.
+conditional metrics are `null` with coverage. Session 14 adds the separate
+v1.5 overlap path below.
 
 This remains a text-timeline adaptation, not an official speech-output score.
+
+## Full-Duplex-Bench Session 14 v1.5 overlap adaptation
+
+The four paired v1.5 subsets are `user_interruption`, `user_backchannel`,
+`talking_to_other`, and `background_speech`. Each caller-owned sample must have
+mono 16 kHz `input.wav` and `clean_input.wav` of equal length plus `metadata.json`
+with `context_text`, `current_turn_text`, and bounded `[start, end]` overlap
+timestamps. The folder name is its stable ID. The runner generates native text
+and event traces for both audio inputs; it does not need ASR or generated audio.
+
+~~~bash
+.venv/bin/python benchmarks/full_duplex_bench.py \
+  --model-mode duplex --adapter outputs/session11-diagnostic/final \
+  --data-dir /path/to/data-full-duplex-bench/v1_5 \
+  --task user_interruption --limit 1 \
+  --output outputs/full-duplex-bench/v15-interruption.json
+~~~
+
+The result contains post-overlap text, an optional `RESPOND` / `RESUME` /
+`UNCERTAIN` / `UNKNOWN` behavior category, and three timing values with null
+reason codes and aggregate validity denominators. Paper equation (1) is adapted
+as final pre-STOP lexical word availability minus overlap user start. The
+predicted control `STOP` minus user start is reported separately as an internal
+metric. Paper equation (2) is the first lexical word of the next response minus
+overlap user end. Timing uses causal available time; a negative value is kept
+only when the trace itself places that word before the reference boundary.
+
+To run the optional semantic judge, add `--judge` and optionally
+`--judge-cache-dir /path/to/cache`. The saved
+[`full_duplex_behavior_v1.txt`](full_duplex_behavior_v1.txt) prompt is versioned
+and hashed in each judged result. The judge requests temperature zero and seed
+one where the API supports them, caches the raw response per sample and prompt,
+and reuses it on reruns. Unit tests use a fake client and make no API calls.
+
+Native model text replaces the official ASR transcript, and lexical/control
+timing replaces waveform VAD timing. These text-only results are **not directly
+comparable to official speech-output scores**. See the [v1.5 paper](https://arxiv.org/abs/2507.23159)
+and the [pinned upstream dataset README](https://github.com/DanielLin94144/Full-Duplex-Bench/blob/3e799c45a045256f47d5f1c9cda90157e2d2ec9e/v1_v1.5/dataset/README.md).

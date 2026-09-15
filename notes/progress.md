@@ -768,3 +768,36 @@ downloaded to manufacture that smoke.
 
 Stop boundary: Session 13 ends here. Full-Duplex-Bench v1.5 and any full-data
 run remain unimplemented/unrun.
+
+## Session 14 — Full-Duplex-Bench v1.5 text-timeline overlap adaptation
+
+Status: implementation and handcrafted validation complete. The pinned
+`3e799c45a045256f47d5f1c9cda90157e2d2ec9e` dataset and evaluation
+READMEs, `eval_behavior.py`, `get_timing.py`, and v1.5 paper equations (1) and
+(2) were inspected. No upstream data or code was downloaded into the repo.
+
+The four paired subsets validate nonempty mono 16 kHz WAVs of equal duration,
+required metadata text, finite bounded overlap timestamps, and stable folder
+IDs. Both clean and overlap inputs produce native text/control traces. The
+overlap result includes post-overlap text and optional versioned semantic
+classification with deterministic API parameters where supported, raw-response
+cache, and resumable cache reads. Word-stop and next-response latency adapt the
+paper equations to causal lexical availability; predicted control-STOP latency
+is separate and internal. No pre-overlap speech, no STOP, and no next response
+produce null values with reason codes and denominator counts. Causally valid
+negative values remain negative; impossible available-time traces raise an
+error. These are text-timeline results and are not directly comparable to the
+official speech-output scores.
+
+Handcrafted tests cover all four scenarios, post-overlap slicing and
+RESPOND/RESUME judge parsing, missing pre/STOP/post segments, STOP versus final
+word, paired validation, stable ID, coverage, exact formulas, and fake-client
+cache reuse without API calls. No local v1.5 data was available for model smoke;
+no sample was downloaded. The excluded waveform, prosody, perceived-quality,
+and related significance measures were not added.
+
+Validation: `.venv/bin/python -m pytest -q tests/test_full_duplex_v15.py
+tests/test_benchmarks.py` passed with 35 tests; the full suite passed with 122
+tests and 5 opt-in skips. Compilation, CLI help, and `git diff --check` passed.
+
+Stop boundary: Session 14 ends here; no full-data benchmark run was launched.

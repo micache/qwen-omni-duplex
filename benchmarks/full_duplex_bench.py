@@ -1,4 +1,4 @@
-"""Full-Duplex-Bench v1.0 text-timeline adaptation.
+"""Full-Duplex-Bench v1.0 and v1.5 text-timeline adaptations.
 
 This evaluates text/control timelines only. It never creates speech, runs VAD,
 or claims an official speech-output benchmark score.
@@ -7,11 +7,12 @@ or claims an official speech-output benchmark score.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
@@ -39,6 +40,9 @@ TASK_DIRECTORIES = {
     "smooth_turn_taking": ("candor_turn_taking",),
     "user_interruption": ("synthetic_user_interruption",),
 }
+V15_TASKS = ("user_interruption", "user_backchannel", "talking_to_other", "background_speech")
+V15_NAME = "Full-Duplex-Bench v1.5 text-timeline adaptation"
+V15_PROMPT = Path(__file__).with_name("full_duplex_behavior_v1.txt")
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,7 @@ class BenchmarkSample:
     input_path: Path
     input_duration_s: float
     annotation: Mapping[str, Any] | None
+    clean_input_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -106,8 +111,8 @@ class RunSettings:
     def validate(self) -> None:
         if self.model_mode not in {"base", "duplex"}:
             raise ValueError("model_mode must be base or duplex.")
-        if self.task not in TASK_DIRECTORIES:
-            raise ValueError(f"Unsupported v1.0 task {self.task!r}.")
+        if self.task not in TASK_DIRECTORIES and self.task not in V15_TASKS:
+            raise ValueError(f"Unsupported task {self.task!r}.")
         if not self.data_dir.is_dir():
             raise FileNotFoundError(f"Benchmark data directory not found: {self.data_dir}")
         if self.model_mode == "duplex" and self.adapter is None:
@@ -125,6 +130,56 @@ def _wav_duration(path: Path) -> float:
     if info.frames <= 0 or info.samplerate <= 0:
         raise ValueError(f"Invalid or empty input WAV: {path}")
     return info.frames / info.samplerate
+
+
+def load_v15_samples(data_dir: Path, task: str) -> list[BenchmarkSample]:
+    """Validate caller-owned paired v1.5 audio and overlap metadata."""
+    if task not in V15_TASKS:
+        raise ValueError(f"Unsupported v1.5 subset {task!r}.")
+    root = data_dir.resolve()
+    subset = root / task if (root / task).is_dir() else root
+    if not subset.is_dir():
+        raise FileNotFoundError(subset)
+    directories = [subset] if (subset / "input.wav").is_file() else sorted(
+        path for path in subset.iterdir() if path.is_dir())
+    samples = []
+    seen = set()
+    for directory in directories:
+        # IDs are stable across runs, clean/overlap generation, and root locations.
+        identifier = directory.name
+        if not identifier or identifier.startswith(".") or identifier in seen:
+            raise ValueError(f"Invalid or duplicate v1.5 sample ID: {identifier!r}")
+        seen.add(identifier)
+        input_path, clean_path = directory / "input.wav", directory / "clean_input.wav"
+        metadata_path = directory / "metadata.json"
+        for path in (input_path, clean_path, metadata_path):
+            if not path.is_file():
+                raise FileNotFoundError(f"Missing paired v1.5 file: {path}")
+        import soundfile as sf
+        noisy, clean = sf.info(input_path), sf.info(clean_path)
+        for path, info in ((input_path, noisy), (clean_path, clean)):
+            if info.channels != 1 or info.samplerate != 16_000 or info.frames <= 0:
+                raise ValueError(f"v1.5 WAV must be nonempty mono 16 kHz: {path}")
+        if noisy.frames != clean.frames:
+            raise ValueError(f"Paired v1.5 WAV durations differ for {identifier}")
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if not isinstance(metadata, dict):
+            raise ValueError(f"Invalid v1.5 metadata for {identifier}")
+        stamps = metadata.get("timestamps")
+        if (not isinstance(stamps, list) or len(stamps) != 2 or
+                any(isinstance(v, bool) or not isinstance(v, (int, float)) or
+                    not math.isfinite(v) for v in stamps)):
+            raise ValueError(f"Invalid v1.5 timestamps for {identifier}")
+        start, end = map(float, stamps)
+        duration = noisy.frames / noisy.samplerate
+        if not 0 <= start < end <= duration:
+            raise ValueError(f"Out-of-range v1.5 timestamps for {identifier}")
+        for key in ("context_text", "current_turn_text"):
+            if not isinstance(metadata.get(key), str):
+                raise ValueError(f"Missing v1.5 {key} for {identifier}")
+        samples.append(BenchmarkSample(identifier, task, directory, input_path, duration,
+                                       metadata, clean_path))
+    return samples
 
 
 def _annotation(sample_dir: Path, task: str) -> Mapping[str, Any] | None:
@@ -415,6 +470,157 @@ def summarize(records: Sequence[Mapping[str, Any]], task: str) -> dict[str, Any]
     return result
 
 
+def _nullable(value: float | None, reason: str | None = None) -> dict[str, Any]:
+    return {"value_s": value, "reason": reason if value is None else None,
+            "valid": value is not None}
+
+
+def evaluate_v15_timeline(sample: BenchmarkSample, generated: GeneratedTimeline, *,
+                          model_mode: str, clean_generated: GeneratedTimeline | None = None) -> dict[str, Any]:
+    """Paper equations (1)-(2), using causal lexical availability in place of VAD."""
+    if sample.task not in V15_TASKS or sample.annotation is None:
+        raise ValueError("A validated v1.5 sample is required.")
+    start, end = map(float, sample.annotation["timestamps"])
+    records = list(generated.trace)
+    for index, event in enumerate(records):
+        if (not math.isfinite(event.available_time_s) or
+                not math.isfinite(event.audio_time_s) or
+                event.available_time_s < event.audio_time_s - 1e-9 or
+                event.available_time_s < 0 or
+                (index and event.available_time_s < records[index - 1].available_time_s - 1e-9)):
+            raise ValueError(f"Invalid causal available-time trace for {sample.sample_id} event {index}")
+    if records:
+        records, _ = _assign_exact_decoded_deltas(records, generated.tokenizer)
+        exact, words = _word_chunks(records, generated.tokenizer)
+    else:
+        exact, words = "", []
+    segments = _segments(records, words, BenchmarkConfig())
+    # The pre-overlap response must have lexical speech available by user onset.
+    pre = next((row for row in segments if row["start"]["available_time_s"] <= start
+                and any(w["available_time_s"] <= start for w in row["word_chunks"])
+                and (row["stop"] is None or row["stop"]["available_time_s"] >= start)), None)
+    if pre is None:
+        word_stop = control_stop = _nullable(None, "no_pre_overlap_speech")
+        response = _nullable(None, "no_pre_overlap_speech")
+    elif pre["stop"] is None:
+        word_stop = control_stop = _nullable(None, "no_stop")
+        response = _nullable(None, "no_stop")
+    else:
+        # Final lexical word of the response that STOP closes; STOP itself is
+        # an internal control prediction, not the paper's acoustic stop time.
+        last = pre["last_word"]
+        word_stop = _nullable(float(last["available_time_s"]) - start)
+        control_stop = _nullable(float(pre["stop"]["available_time_s"]) - start)
+        pre_index = segments.index(pre)
+        following = next((row for row in segments[pre_index + 1:]
+                          if row["first_word"] is not None), None)
+        response = (_nullable(float(following["first_word"]["available_time_s"]) - end)
+                    if following else _nullable(None, "no_next_response"))
+    # A word belongs to the post-overlap text only when its final token was
+    # causally available after the event began. Keep continuation and next turns.
+    post_words = [w for w in words if float(w["available_time_s"]) >= start]
+    post_text = (exact[post_words[0]["character_start"]:] if post_words else "")
+    clean_text = ""
+    if clean_generated is not None:
+        clean_records = list(clean_generated.trace)
+        if clean_records:
+            clean_records, _ = _assign_exact_decoded_deltas(clean_records, clean_generated.tokenizer)
+            clean_text, _ = _word_chunks(clean_records, clean_generated.tokenizer)
+    return {
+        "label": V15_NAME, "schema": "full_duplex_bench_v15_text_timeline_result_v1",
+        "official_speech_output_score": False, "directly_comparable_to_official": False,
+        "sample_id": sample.sample_id, "task": sample.task, "model_mode": model_mode,
+        "overlap_user_interval_s": [start, end], "decoded_text_exact": exact,
+        "clean_decoded_text_exact": clean_text, "post_overlap_text": post_text,
+        "timeline": {"events": [r.as_dict() for r in records], "words": words,
+                     "response_segments": segments},
+        "metrics": {"word_stop_latency": word_stop,
+                    "control_stop_latency_internal": control_stop,
+                    "next_response_latency": response},
+        "behavior": {"category": None, "reason": "judge_not_called",
+                     "valid": False, "prompt_version": "v1"},
+        "judge_input": {"context_text": sample.annotation["context_text"],
+                        "current_turn_text": sample.annotation["current_turn_text"],
+                        "clean_response_text": clean_text, "overlap_response_text": exact,
+                        "post_overlap_text": post_text},
+        "upstream": {"repository": UPSTREAM_REPOSITORY, "revision": UPSTREAM_REVISION,
+                     "paper": "https://arxiv.org/abs/2507.23159"},
+    }
+
+
+def summarize_v15(records: Sequence[Mapping[str, Any]], task: str) -> dict[str, Any]:
+    if task not in V15_TASKS or any(r.get("label") != V15_NAME or r.get("task") != task
+                                    for r in records):
+        raise ValueError("Cannot summarize mixed v1.5 records.")
+    total = len(records)
+    result: dict[str, Any] = {"label": V15_NAME, "task": task, "sample_count": total,
+                              "metrics": {}, "behavior": {}}
+    for key in ("word_stop_latency", "control_stop_latency_internal", "next_response_latency"):
+        entries = [r["metrics"][key] for r in records]
+        values = [e["value_s"] for e in entries if e["valid"]]
+        reasons: dict[str, int] = {}
+        for entry in entries:
+            if entry["reason"]:
+                reasons[entry["reason"]] = reasons.get(entry["reason"], 0) + 1
+        result["metrics"][key] = {"mean_s": sum(values) / len(values) if values else None,
+                                   "valid": len(values), "total": total, "reasons": reasons}
+    categories = {name: 0 for name in ("RESPOND", "RESUME", "UNCERTAIN", "UNKNOWN")}
+    reasons = {}
+    for record in records:
+        behavior = record["behavior"]
+        if behavior["valid"]:
+            categories[behavior["category"]] += 1
+        else:
+            reason = behavior["reason"]
+            reasons[reason] = reasons.get(reason, 0) + 1
+    valid = sum(categories.values())
+    result["behavior"] = {"counts": categories, "valid": valid, "total": total,
+                          "rates_among_valid": {k: v / valid if valid else None
+                                                for k, v in categories.items()},
+                          "reasons": reasons}
+    return result
+
+
+def judge_v15_behavior(record: dict[str, Any], *, cache_dir: Path, client: object | None = None,
+                       model: str = "gpt-4o-2024-08-06") -> dict[str, Any]:
+    """Cache raw API output before parsing; a cache hit makes reruns resumable."""
+    prompt = V15_PROMPT.read_text(encoding="utf-8")
+    version = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    payload = json.dumps(record["judge_input"], sort_keys=True, ensure_ascii=False)
+    key = hashlib.sha256(json.dumps([record["task"], record["sample_id"], model,
+                                     version, payload]).encode("utf-8")).hexdigest()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / f"{key}.json"
+    if path.is_file():
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        if client is None:
+            from openai import OpenAI
+            client = OpenAI()
+        response = client.chat.completions.create(
+            model=model, temperature=0, seed=1,
+            messages=[{"role": "system", "content": prompt},
+                      {"role": "user", "content": payload}])
+        raw = {"model": model, "prompt_sha256": version,
+               "response": response.choices[0].message.content,
+               "response_id": getattr(response, "id", None)}
+        path.write_text(json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    try:
+        parsed = json.loads(raw["response"])
+        category = parsed["category"].upper()
+        if category not in {"RESPOND", "RESUME", "UNCERTAIN", "UNKNOWN"}:
+            raise ValueError(category)
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        record["behavior"] = {"category": None, "reason": "invalid_judge_response",
+                              "valid": False, "prompt_version": "v1",
+                              "prompt_sha256": version, "raw_cache": str(path)}
+    else:
+        record["behavior"] = {"category": category, "reason": None, "valid": True,
+                              "prompt_version": "v1", "prompt_sha256": version,
+                              "raw_cache": str(path)}
+    return record
+
+
 def _simple_record(sample_id: str, index: int, kind: str, token_id: int, when: float) -> EventTraceRecord:
     return EventTraceRecord(
         sample_id=sample_id, chunk_index=0, frame_index=index, audio_time_s=when,
@@ -538,20 +744,46 @@ def _load_ground_truth(path: Path | None) -> Mapping[str, Sequence[float]]:
 
 def run_benchmark(settings: RunSettings, *, limit: int | None = None, start_index: int = 0,
                   ground_truth_path: Path | None = None,
+                  judge: bool = False, judge_cache_dir: Path | None = None,
+                  judge_client: object | None = None,
                   sample_loader: Callable[[Path, str], list[BenchmarkSample]] = load_samples,
                   backend_loader: Callable[[RunSettings], TimelineBackend] = load_backend) -> dict[str, Any]:
     settings.validate()
     if start_index < 0 or (limit is not None and limit < 0):
         raise ValueError("start_index and limit must be non-negative.")
-    samples = sample_loader(settings.data_dir, settings.task)
+    v15 = settings.task in V15_TASKS and (settings.data_dir / settings.task).is_dir()
+    # v1.0 interruption lives under synthetic_user_interruption; a standalone
+    # v1.5 subset is identified by the paired clean input.
+    if settings.task == "user_interruption" and not v15:
+        v15 = (settings.data_dir / "clean_input.wav").is_file()
+    if settings.task in V15_TASKS and settings.task != "user_interruption":
+        v15 = True
+    samples = load_v15_samples(settings.data_dir, settings.task) if v15 else sample_loader(
+        settings.data_dir, settings.task)
     selected = samples[start_index:] if limit is None else samples[start_index:start_index + limit]
     backend = backend_loader(settings) if selected else None
     ground_truth, records = _load_ground_truth(ground_truth_path), []
     for sample in selected:
         assert backend is not None
+        if v15:
+            assert sample.clean_input_path is not None
+            clean_sample = replace(sample, input_path=sample.clean_input_path)
+            record = evaluate_v15_timeline(sample, backend.generate(sample),
+                                           model_mode=settings.model_mode,
+                                           clean_generated=backend.generate(clean_sample))
+            if judge:
+                if judge_cache_dir is None:
+                    raise ValueError("Judge requires a raw-response cache directory.")
+                judge_v15_behavior(record, cache_dir=judge_cache_dir, client=judge_client)
+            records.append(record)
+            continue
         gt = ground_truth.get(sample.sample_id) or ground_truth.get(sample.directory.name)
         records.append(evaluate_timeline(sample, backend.generate(sample), model_mode=settings.model_mode,
                                          ground_truth_distribution=gt))
+    if v15:
+        return {"label": V15_NAME, "schema": "full_duplex_bench_v15_text_timeline_run_v1",
+                "model_mode": settings.model_mode, "data_directory": str(settings.data_dir.resolve()),
+                "records": records, "summary": summarize_v15(records, settings.task)}
     return {
         "label": ADAPTATION_NAME, "schema": "full_duplex_bench_v1_text_timeline_run_v1",
         "model_mode": settings.model_mode, "data_directory": str(settings.data_dir.resolve()),
@@ -563,7 +795,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-mode", required=True, choices=["base", "duplex"])
     parser.add_argument("--data-dir", required=True, type=Path)
-    parser.add_argument("--task", required=True, choices=sorted(TASK_DIRECTORIES))
+    parser.add_argument("--task", required=True, choices=sorted(set(TASK_DIRECTORIES) | set(V15_TASKS)))
     adapter = parser.add_mutually_exclusive_group()
     adapter.add_argument("--adapter", type=Path)
     adapter.add_argument("--checkpoint", type=Path)
@@ -574,6 +806,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--max-silent-chunks", type=int, default=4)
     parser.add_argument("--allow-download", action="store_true")
+    parser.add_argument("--judge", action="store_true", help="Run optional v1.5 semantic judge")
+    parser.add_argument("--judge-cache-dir", type=Path)
     return parser
 
 
@@ -583,7 +817,9 @@ def main() -> None:
                            adapter=args.adapter or args.checkpoint, max_new_tokens=args.max_new_tokens,
                            max_silent_chunks=args.max_silent_chunks, allow_download=args.allow_download)
     result = run_benchmark(settings, limit=args.limit, start_index=args.start_index,
-                           ground_truth_path=args.ground_truth_distribution)
+                           ground_truth_path=args.ground_truth_distribution,
+                           judge=args.judge,
+                           judge_cache_dir=args.judge_cache_dir or args.output.parent / "judge-cache")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result["summary"], ensure_ascii=False, indent=2))
