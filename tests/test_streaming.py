@@ -204,7 +204,7 @@ def test_scripted_wait_start_text_idle_stop_and_previous_event_inputs():
     assert thinker.audio_tower.calls == 1
     assert len(thinker.model.calls) == 6  # one prefill, five cached feature steps
     step_fusions = [call["inputs_embeds"] for call in thinker.model.calls[1:]]
-    assert torch.equal(step_fusions[0], torch.zeros_like(step_fusions[0]))
+    assert torch.equal(step_fusions[0], thinker.get_input_embeddings()(torch.tensor([[6]])))
     for index, previous in enumerate([IDLE, START, 1, IDLE], start=1):
         torch.testing.assert_close(
             step_fusions[index], thinker.embedding(torch.tensor([[previous]]))

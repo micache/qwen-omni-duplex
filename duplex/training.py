@@ -76,6 +76,10 @@ MODEL_INPUTS = {
     "input_features",
     "feature_attention_mask",
     "preconv_feature_lengths",
+    "audio_chunk_counts",
+    "audio_cache_keys",
+    "context_ids",
+    "bootstrap_mask",
     "labels",
     "position_ids",
     "past_key_values",
@@ -250,21 +254,30 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
         "split_seed",
         "window_seed",
         "interruption_seed",
-        "max_steps",
         "batch_size",
         "gradient_accumulation_steps",
     ):
         value = training.get(name)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ValueError(f"training.{name} must be a non-negative integer.")
+    full_conversations = bool(data.get("complete_conversations", False))
+    if full_conversations:
+        if data.get("overfit_subset"):
+            if not 100 <= training.get("max_steps", 0) <= 300:
+                raise ValueError("Complete-conversation overfit requires 100-300 optimizer steps.")
+        else:
+            if training.get("num_train_epochs") not in (3,):
+                raise ValueError("Complete-conversation main training requires three epochs.")
+            if training.get("max_steps") is not None:
+                raise ValueError("Complete-conversation main training must not set max_steps.")
+    elif isinstance(training.get("max_steps"), bool) or not isinstance(training.get("max_steps"), int) or training["max_steps"] < 1:
+        raise ValueError("training.max_steps must be positive for window experiments.")
     if (
-        training["max_steps"] < 1
-        or training["batch_size"] < 1
+        training["batch_size"] < 1
         or training["gradient_accumulation_steps"] < 1
     ):
         raise ValueError(
-            "training.max_steps, batch_size, and gradient_accumulation_steps "
-            "must be positive."
+            "training.batch_size and gradient_accumulation_steps must be positive."
         )
     if selected_windows is not None and not 100 <= training["max_steps"] <= 300:
         raise ValueError("The Session 09 overfit budget must be 100-300 optimizer steps.")
@@ -458,6 +471,7 @@ def build_training_model(config: Mapping[str, Any]) -> tuple[QwenDuplexThinker, 
         control_tokens=control_tokens,
         loss_weights=NextEventLossWeights(**config["loss_weights"]),
     )
+    duplex.processor = processor
     assert_only_allowed_lora_trainable(duplex, targets)
     return duplex, processor, targets
 
@@ -782,10 +796,15 @@ class Session08Trainer(Trainer):
         batches = max(totals["batches"], 1.0)
         valid = max(sum(totals[f"label_count_{group}"] for group in GROUPS), 1.0)
         result = {f"{mode}_total_loss": totals["total_loss"] / batches}
+        control_count = sum(totals[f"label_count_{group}"] for group in ("idle", "start", "stop"))
+        control_sum = sum(totals[f"loss_sum_{group}"] for group in ("idle", "start", "stop"))
+        result[f"{mode}_control_loss"] = control_sum / max(control_count, 1.0)
+        result[f"{mode}_lexical_loss"] = totals["loss_sum_text"] / max(totals["label_count_text"], 1.0)
         for group in GROUPS:
             count = totals[f"label_count_{group}"]
             result[f"{mode}_{group}_loss"] = totals[f"loss_sum_{group}"] / max(count, 1.0)
             result[f"{mode}_{group}_label_count"] = totals[f"label_count_{group}"]
+            result[f"{mode}_{group}_predicted_count"] = totals[f"predicted_count_{group}"]
             result[f"{mode}_{group}_predicted_fraction"] = (
                 totals[f"predicted_count_{group}"] / valid
             )
@@ -916,7 +935,8 @@ def make_training_arguments(config: Mapping[str, Any], *, max_steps: int | None 
         gradient_accumulation_steps=training["gradient_accumulation_steps"],
         learning_rate=float(training["learning_rate"]),
         lr_scheduler_type=training.get("lr_scheduler_type", "linear"),
-        max_steps=training["max_steps"] if max_steps is None else max_steps,
+        max_steps=(-1 if training.get("max_steps") is None else training["max_steps"]) if max_steps is None else max_steps,
+        num_train_epochs=float(training.get("num_train_epochs", 1)),
         warmup_steps=training.get("warmup_steps", 0),
         weight_decay=float(training.get("weight_decay", 0.0)),
         max_grad_norm=float(training.get("max_grad_norm", 1.0)),

@@ -110,6 +110,32 @@ class WindowMetadata:
             raise ValueError("Window metadata must describe exactly 2 seconds.")
 
 
+@dataclass(frozen=True)
+class SpanMetadata:
+    """One outer eight-second supervision boundary, with four audio chunks."""
+
+    conversation_id: str
+    split: Split
+    start_seconds: float
+    end_seconds: float
+
+    def __post_init__(self) -> None:
+        if not math.isclose(self.end_seconds - self.start_seconds, 8.0, abs_tol=1e-9):
+            raise ValueError("Continuous span metadata must describe exactly 8 seconds.")
+
+
+@dataclass(frozen=True)
+class ConversationMetadata:
+    conversation_id: str
+    split: Split
+    start_seconds: float
+    end_seconds: float
+
+    def __post_init__(self) -> None:
+        if self.start_seconds != 0 or self.end_seconds <= 0:
+            raise ValueError("Conversation metadata must cover the complete recording.")
+
+
 def _positive_finite_number(value: object, *, field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{field} must be a number, got {value!r}.")
@@ -585,6 +611,7 @@ class DuplexCollator:
         interruption_probability: float = 0.0,
         min_assistant_frames: int = 1,
         augmentation_seed: int = 0,
+        context_token_ids: Sequence[int] = (),
     ) -> None:
         from .timeline import InterruptionConfig, TimelineSpec
 
@@ -601,6 +628,7 @@ class DuplexCollator:
         self.control_tokens = control_tokens
         self.thinker_bos_token_id = thinker_bos_token_id
         self.frame_rate_hz = frame_rate_hz
+        self.context_token_ids = tuple(context_token_ids)
         self.interruption_config = (
             InterruptionConfig(
                 probability=interruption_probability,
@@ -644,7 +672,7 @@ class DuplexCollator:
                 "(record, window), or a matching mapping."
             )
         if not isinstance(record, ConversationRecord) or not isinstance(
-            window, WindowMetadata
+            window, (WindowMetadata, SpanMetadata, ConversationMetadata)
         ):
             raise TypeError("Sample record/window values have unexpected types.")
         return build_window_timeline(
@@ -658,6 +686,7 @@ class DuplexCollator:
 
     def _extract_audio(self, timelines: Sequence[object]) -> dict[str, Any]:
         import torch
+        from .streaming import prepare_partial_audio_for_extractor
 
         extractor = getattr(
             self.audio_processor, "feature_extractor", self.audio_processor
@@ -669,7 +698,21 @@ class DuplexCollator:
             raise ValueError(
                 f"A batch must use one audio sample rate, got {sorted(sample_rates)}."
             )
-        waveforms = [timeline.user_waveform for timeline in timelines]
+        waveforms = []
+        valid_preconv_lengths = []
+        chunk_counts = []
+        for timeline in timelines:
+            chunk_samples = round(2.0 * timeline.audio_sample_rate_hz)
+            duration = timeline.window_end_seconds - timeline.window_start_seconds
+            count = (len(timeline.user_waveform) + chunk_samples - 1) // chunk_samples
+            if count < 1:
+                raise ValueError(f"{timeline.sample_id}: empty audio.")
+            chunk_counts.append(count)
+            for index in range(count):
+                block = timeline.user_waveform[index * chunk_samples:(index + 1) * chunk_samples]
+                prepared, valid_preconv = prepare_partial_audio_for_extractor(block, extractor)
+                waveforms.append(prepared)
+                valid_preconv_lengths.append(valid_preconv)
         processed = extractor(
             waveforms,
             sampling_rate=sample_rates.pop(),
@@ -690,9 +733,13 @@ class DuplexCollator:
             )
         input_features = torch.as_tensor(input_features)
         feature_mask = torch.as_tensor(feature_mask)
-        if input_features.shape[0] != len(timelines):
-            raise ValueError("input_features batch dimension does not match samples.")
-        if feature_mask.ndim != 2 or feature_mask.shape[0] != len(timelines):
+        for index, valid_preconv in enumerate(valid_preconv_lengths):
+            if len(waveforms[index]) < chunk_samples:
+                feature_mask[index].zero_()
+                feature_mask[index, :min(valid_preconv, feature_mask.shape[1])] = 1
+        if input_features.shape[0] != len(waveforms):
+            raise ValueError("input_features batch dimension does not match audio chunks.")
+        if feature_mask.ndim != 2 or feature_mask.shape[0] != len(waveforms):
             raise ValueError(
                 "feature_attention_mask must have shape [batch, preconv_time]."
             )
@@ -704,6 +751,7 @@ class DuplexCollator:
             "input_features": input_features,
             "feature_attention_mask": feature_mask,
             "preconv_feature_lengths": preconv_lengths,
+            "audio_chunk_counts": torch.tensor(chunk_counts, dtype=torch.long),
         }
 
     def __call__(self, items: Sequence[object]) -> dict[str, Any]:
@@ -742,6 +790,10 @@ class DuplexCollator:
         result: dict[str, Any] = self._extract_audio(timelines)
         result.update(
             {
+                "audio_cache_keys": tuple(
+                    hashlib.sha256(b"qwen-2s-mask-v2\0" + memoryview(timeline.user_waveform).tobytes()).hexdigest()
+                    for timeline in timelines
+                ),
                 "text_ids": torch.tensor(
                     [row.text_ids for row in causal], dtype=torch.long
                 ),
@@ -760,7 +812,10 @@ class DuplexCollator:
                 "attention_mask": torch.tensor(
                     [row.attention_mask for row in causal], dtype=torch.bool
                 ),
+                "position_ids": torch.arange(timeline_length, dtype=torch.long)[None, :].expand(len(causal), -1).clone(),
                 "event_types": tuple(tuple(row.event_types) for row in causal),
+                "bootstrap_mask": torch.tensor([row.bootstrap_mask for row in causal], dtype=torch.bool),
+                "context_ids": torch.tensor([self.context_token_ids] * len(causal), dtype=torch.long),
                 "frame_times": tuple(
                     None if row.frame_times is None else tuple(row.frame_times)
                     for row in causal
@@ -768,6 +823,8 @@ class DuplexCollator:
                 "sample_metadata": tuple(
                     {
                         "sample_id": timeline.sample_id,
+                        "conversation_id": timeline.conversation_id,
+                        "valid_sequence_length": timeline.valid_sequence_length,
                         "window_start_seconds": timeline.window_start_seconds,
                         "window_end_seconds": timeline.window_end_seconds,
                         "interruption": timeline.interruption,

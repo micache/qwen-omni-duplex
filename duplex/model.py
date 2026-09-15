@@ -13,6 +13,7 @@ from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
 
 from .timeline import IGNORE_LABEL, ControlTokenIds, TimelineSpec
+from .contract import DEFAULT_SYSTEM_PROMPT, prompt_token_ids
 
 
 MODEL_ID = "Qwen/Qwen2.5-Omni-3B"
@@ -57,6 +58,16 @@ class NextEventLossWeights:
 
     def as_dict(self) -> dict[str, float]:
         return {name: float(getattr(self, name)) for name in _GROUPS}
+
+    @classmethod
+    def capped_inverse_sqrt(cls, counts: Mapping[str, int], *, max_ratio: float = 5.0) -> "NextEventLossWeights":
+        if max_ratio < 1:
+            raise ValueError("max_ratio must be at least one.")
+        raw = {name: 1 / math.sqrt(max(int(counts[name]), 1)) for name in _GROUPS}
+        floor = max(raw.values()) / max_ratio
+        capped = {name: max(weight, floor) for name, weight in raw.items()}
+        average = sum(capped.values()) / len(capped)
+        return cls(**{name: weight / average for name, weight in capped.items()})
 
 
 @dataclass
@@ -140,6 +151,27 @@ class QwenDuplexThinker(nn.Module):
 
         get_base_model = getattr(self.thinker, "get_base_model", None)
         return get_base_model() if callable(get_base_model) else self.thinker
+
+    def generate(self, audio_path: str | "Path", *, system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+                 max_new_tokens: int = 256) -> "DuplexGenerationResult":
+        """Generate from a complete audio file with one persistent streaming cache."""
+        from pathlib import Path
+        import numpy as np
+        import soundfile as sf
+        from .dataset import resample_waveform_to_16khz
+        from .streaming import DuplexGenerationResult, QwenDuplexStreamer
+
+        if max_new_tokens < 1:
+            raise ValueError("max_new_tokens must be positive.")
+        processor = getattr(self, "processor", None)
+        if processor is None:
+            raise RuntimeError("Model generation requires its Qwen processor.")
+        waveform, sample_rate = sf.read(Path(audio_path), dtype="float32", always_2d=True)
+        mono = resample_waveform_to_16khz(np.asarray(waveform.mean(axis=1), dtype=np.float32), sample_rate)
+        result = QwenDuplexStreamer(self, processor, max_new_tokens=max_new_tokens).run(
+            mono, sample_id=Path(audio_path).stem,
+            context_token_ids=prompt_token_ids(processor.tokenizer, system_prompt))
+        return DuplexGenerationResult.from_streaming(result)
 
     @property
     def frames_per_chunk(self) -> int:
@@ -253,6 +285,8 @@ class QwenDuplexThinker(nn.Module):
         input_features: torch.Tensor,
         feature_attention_mask: torch.Tensor,
         preconv_feature_lengths: torch.Tensor,
+        audio_chunk_counts: torch.Tensor | None = None,
+        audio_cache_keys: tuple[str, ...] | None = None,
         current_attention: torch.Tensor,
         timeline_length: int,
         hidden_width: int,
@@ -260,15 +294,22 @@ class QwenDuplexThinker(nn.Module):
         dtype: torch.dtype,
     ) -> torch.Tensor:
         batch_size = current_attention.shape[0]
-        if input_features.ndim < 2 or input_features.shape[0] != batch_size:
-            raise ValueError("input_features batch dimension does not match the timeline.")
-        if feature_attention_mask.ndim != 2 or feature_attention_mask.shape[0] != batch_size:
+        strict_chunks = audio_chunk_counts is not None
+        if audio_chunk_counts is None:
+            audio_chunk_counts = torch.ones(batch_size, dtype=torch.long, device=current_attention.device)
+        counts = audio_chunk_counts.to(dtype=torch.long).tolist()
+        if len(counts) != batch_size or any(count < 1 for count in counts):
+            raise ValueError("audio_chunk_counts must map each sample to its positive chunk count.")
+        chunk_total = sum(counts)
+        if input_features.ndim < 2 or input_features.shape[0] != chunk_total:
+            raise ValueError("input_features batch dimension does not match audio chunks.")
+        if feature_attention_mask.ndim != 2 or feature_attention_mask.shape[0] != chunk_total:
             raise ValueError(
                 "feature_attention_mask must have shape [batch, preconv_time]."
             )
         self._check_binary_mask("feature_attention_mask", feature_attention_mask)
-        if preconv_feature_lengths.ndim != 1 or preconv_feature_lengths.shape[0] != batch_size:
-            raise ValueError("preconv_feature_lengths must have shape [batch].")
+        if preconv_feature_lengths.ndim != 1 or preconv_feature_lengths.shape[0] != chunk_total:
+            raise ValueError("preconv_feature_lengths must have shape [audio_chunks].")
 
         mask_lengths = feature_attention_mask.to(dtype=torch.long).sum(dim=-1)
         supplied_lengths = preconv_feature_lengths.to(
@@ -287,16 +328,24 @@ class QwenDuplexThinker(nn.Module):
         output_lengths = torch.as_tensor(
             length_result[1], device=mask_lengths.device, dtype=torch.long
         )
-        if output_lengths.ndim != 1 or output_lengths.shape[0] != batch_size:
+        if output_lengths.ndim != 1 or output_lengths.shape[0] != chunk_total:
             raise ValueError("Qwen audio output lengths do not match the batch.")
         if torch.any(output_lengths < 0):
             raise ValueError("Qwen audio output lengths must be non-negative.")
 
         timeline_lengths = current_attention.to(dtype=torch.long).sum(dim=-1)
-        if not torch.equal(output_lengths, timeline_lengths.to(output_lengths.device)):
+        if strict_chunks and any(length < 1 for length in output_lengths.tolist()):
+            raise ValueError("Every audio chunk must have at least one valid encoder output.")
+        grouped = []
+        offset = 0
+        for count in counts:
+            grouped.append(int(output_lengths[offset:offset + count].sum().item()))
+            offset += count
+        grouped_lengths = torch.tensor(grouped, device=output_lengths.device)
+        if not torch.equal(grouped_lengths, timeline_lengths.to(output_lengths.device)):
             raise ValueError(
                 "Qwen audio output lengths cannot be aligned to the enabled timeline "
-                f"positions: audio={output_lengths.tolist()}, "
+                f"positions: audio={grouped_lengths.tolist()}, "
                 f"timeline={timeline_lengths.tolist()}."
             )
         expected_padding = (
@@ -305,6 +354,22 @@ class QwenDuplexThinker(nn.Module):
         )
         if not torch.equal(current_attention, expected_padding):
             raise ValueError("Timeline attention must be contiguous with trailing padding.")
+
+        cache_dir = getattr(self, "audio_cache_dir", None)
+        cache_paths = None
+        if cache_dir is not None and audio_cache_keys is not None:
+            from pathlib import Path
+            if len(audio_cache_keys) != batch_size:
+                raise ValueError("audio_cache_keys must have one key per conversation.")
+            cache_paths = [Path(cache_dir) / f"{key}.pt" for key in audio_cache_keys]
+            if all(path.exists() for path in cache_paths):
+                restored = [torch.load(path, map_location="cpu", weights_only=True) for path in cache_paths]
+                if all(tuple(row.shape) == (length, hidden_width)
+                       for row, length in zip(restored, grouped)):
+                    aligned = pad_sequence([row.to(device=device, dtype=dtype) for row in restored], batch_first=True)
+                    if aligned.shape[1] < timeline_length:
+                        aligned = F.pad(aligned, (0, 0, 0, timeline_length - aligned.shape[1]))
+                    return aligned
 
         audio_output = self.base_thinker.get_audio_features(
             input_features=input_features,
@@ -325,7 +390,17 @@ class QwenDuplexThinker(nn.Module):
                 f"hidden width {hidden_width}."
             )
 
-        restored = torch.split(flattened, output_lengths.tolist(), dim=0)
+        chunks = torch.split(flattened, output_lengths.tolist(), dim=0)
+        restored = []
+        offset = 0
+        for count in counts:
+            restored.append(torch.cat(chunks[offset:offset + count], dim=0))
+            offset += count
+        if cache_paths is not None:
+            for path, row in zip(cache_paths, restored):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if not path.exists():
+                    torch.save(row.detach().to(device="cpu", dtype=torch.bfloat16), path)
         aligned = pad_sequence(restored, batch_first=True)
         if aligned.shape[1] < timeline_length:
             aligned = F.pad(aligned, (0, 0, 0, timeline_length - aligned.shape[1]))
@@ -394,6 +469,10 @@ class QwenDuplexThinker(nn.Module):
         input_features: torch.Tensor | None = None,
         feature_attention_mask: torch.Tensor | None = None,
         preconv_feature_lengths: torch.Tensor | None = None,
+        audio_chunk_counts: torch.Tensor | None = None,
+        audio_cache_keys: tuple[str, ...] | None = None,
+        context_ids: torch.Tensor | None = None,
+        bootstrap_mask: torch.Tensor | None = None,
         labels: torch.Tensor | None = None,
         position_ids: torch.Tensor | None = None,
         past_key_values: object | None = None,
@@ -431,6 +510,11 @@ class QwenDuplexThinker(nn.Module):
         if text_embeddings.shape != control_embeddings.shape:
             raise ValueError("Text and control embeddings do not share one hidden space.")
 
+        if bootstrap_mask is not None:
+            if bootstrap_mask.shape != text_ids.shape or torch.any(bootstrap_mask & ~text_mask.bool()):
+                raise ValueError("bootstrap_mask must select enabled causal text positions.")
+            if torch.any(bootstrap_mask[:, 1:]) or not torch.all(bootstrap_mask[:, 0]):
+                raise ValueError("Only timeline frame zero may receive the causal bootstrap.")
         audio_arguments = (input_features, feature_attention_mask, preconv_feature_lengths)
         if any(value is not None for value in audio_arguments):
             if not all(value is not None for value in audio_arguments):
@@ -442,6 +526,8 @@ class QwenDuplexThinker(nn.Module):
                 input_features=input_features,
                 feature_attention_mask=feature_attention_mask,
                 preconv_feature_lengths=preconv_feature_lengths,
+                audio_chunk_counts=audio_chunk_counts,
+                audio_cache_keys=audio_cache_keys,
                 current_attention=current_attention,
                 timeline_length=timeline_length,
                 hidden_width=text_embeddings.shape[-1],
@@ -452,6 +538,18 @@ class QwenDuplexThinker(nn.Module):
             audio_embeddings = torch.zeros_like(text_embeddings)
 
         fused_embeddings = text_embeddings + audio_embeddings + control_embeddings
+        context_length = 0
+        if context_ids is not None:
+            if context_ids.ndim != 2 or context_ids.shape[0] != text_ids.shape[0]:
+                raise ValueError("context_ids must have shape [batch, context_length].")
+            context_length = context_ids.shape[1]
+            if context_length:
+                if past_key_values is not None:
+                    raise ValueError("Cached execution must prefill context exactly once.")
+                fused_embeddings = torch.cat((embedding(context_ids), fused_embeddings), dim=1)
+                attention_mask = torch.cat((torch.ones_like(context_ids, dtype=torch.bool), attention_mask), dim=1)
+                if position_ids is not None:
+                    position_ids = torch.cat((torch.arange(context_length, device=position_ids.device)[None, :].expand(text_ids.shape[0], -1), position_ids + context_length), dim=1)
         model_outputs = thinker.model(
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -464,6 +562,8 @@ class QwenDuplexThinker(nn.Module):
         if lexical_hidden_states is None:
             lexical_hidden_states = model_outputs[0]
 
+        if context_length:
+            lexical_hidden_states = lexical_hidden_states[:, context_length:]
         logits_input = lexical_hidden_states
         if last_position_only:
             logits_input = logits_input[:, -1:, :]

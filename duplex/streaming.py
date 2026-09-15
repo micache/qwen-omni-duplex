@@ -6,6 +6,7 @@ import math
 import re
 import time
 from contextlib import nullcontext
+from .contract import DEFAULT_SYSTEM_PROMPT, frame_event_inputs, prompt_token_ids
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -91,6 +92,36 @@ class StreamingResult:
     processed_silent_chunks: int
 
 
+@dataclass
+class DuplexGenerationResult:
+    text: str
+    segments: list[dict[str, Any]]
+    events: list[EventTraceRecord]
+    first_word_time_s: float | None
+    last_word_time_s: float | None
+
+    @classmethod
+    def from_streaming(cls, result: StreamingResult) -> "DuplexGenerationResult":
+        segments: list[dict[str, Any]] = []
+        active: dict[str, Any] | None = None
+        completed_times: list[float] = []
+        for row in result.trace:
+            if row.event_type == "START":
+                active = {"start_time_s": row.available_time_s, "text": "", "tokens": [], "lexical_times": []}
+            elif row.event_type == "TEXT" and active is not None:
+                active["tokens"].append(row.event_id)
+                active["text"] += row.decoded_delta
+                active["lexical_times"].append(row.available_time_s)
+            elif row.event_type == "STOP" and active is not None:
+                active["stop_time_s"] = row.available_time_s
+                completed_times.extend(active.pop("lexical_times"))
+                segments.append(active)
+                active = None
+        return cls("".join(segment["text"] for segment in segments), segments, result.trace,
+                   min(completed_times) if completed_times else None,
+                   max(completed_times) if completed_times else None)
+
+
 def split_fixed_audio_chunks(
     waveform: np.ndarray | torch.Tensor | Sequence[float],
     *,
@@ -138,6 +169,17 @@ def split_fixed_audio_chunks(
             )
         )
     return chunks
+
+
+def prepare_partial_audio_for_extractor(values: np.ndarray, extractor) -> tuple[np.ndarray, int]:
+    """Pad only enough for Whisper's reflect STFT; retain real preconv length."""
+    hop = int(getattr(extractor, "hop_length", 160))
+    minimum = max(int(getattr(extractor, "n_fft", 400)) + 1, 3 * hop)
+    # Whisper drops the final STFT frame: valid preconv frames are L // hop.
+    valid_length = max(3, len(values) // hop)
+    if len(values) < minimum:
+        values = np.pad(values, (0, minimum - len(values)))
+    return values, valid_length
 
 
 def _silent_chunk(index: int, start_time_s: float) -> AudioChunk:
@@ -300,6 +342,7 @@ class QwenDuplexStreamer:
         temperature: float = 1.0,
         top_k: int | None = None,
         feature_count_tolerance: int = 1,
+        max_new_tokens: int = 256,
         clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         if model.timeline.chunk_seconds != CHUNK_SECONDS:
@@ -324,6 +367,7 @@ class QwenDuplexStreamer:
         self.temperature = temperature
         self.top_k = top_k
         self.feature_count_tolerance = feature_count_tolerance
+        self.max_new_tokens = max_new_tokens
         self.clock = clock
 
     @property
@@ -341,10 +385,7 @@ class QwenDuplexStreamer:
     def _prefill(self, context_token_ids: Sequence[int]) -> tuple[object, int]:
         token_ids = list(context_token_ids)
         if not token_ids:
-            bos = getattr(self.model.base_thinker.config, "bos_token_id", None)
-            if bos is None:
-                raise ValueError("Empty context requires a Thinker BOS token.")
-            token_ids = [int(bos)]
+            return None, 0
         tokens = torch.tensor([token_ids], dtype=torch.long, device=self.device)
         embedding = self.model.base_thinker.get_input_embeddings()(tokens)
         length = tokens.shape[1]
@@ -377,8 +418,9 @@ class QwenDuplexStreamer:
         if not callable(extractor):
             raise TypeError("Processor or processor.feature_extractor must be callable.")
         valid_waveform = chunk.waveform[chunk.valid_mask]
+        extractor_waveform, valid_preconv = prepare_partial_audio_for_extractor(valid_waveform, extractor)
         processed = extractor(
-            [valid_waveform],
+            [extractor_waveform],
             sampling_rate=AUDIO_SAMPLE_RATE_HZ,
             padding=True,
             return_attention_mask=True,
@@ -395,6 +437,9 @@ class QwenDuplexStreamer:
             raise ValueError("Qwen feature extraction returned no features or valid mask.")
         input_features = torch.as_tensor(input_features, device=self.device)
         feature_mask = torch.as_tensor(feature_mask, device=self.device)
+        if chunk.valid_samples < SAMPLES_PER_CHUNK:
+            feature_mask.zero_()
+            feature_mask[:, :min(valid_preconv, feature_mask.shape[1])] = 1
         preconv_lengths = feature_mask.to(dtype=torch.long).sum(dim=-1)
         length_result = self.model.base_thinker.audio_tower._get_feat_extract_output_lengths(
             preconv_lengths
@@ -455,20 +500,12 @@ class QwenDuplexStreamer:
         state: ResponseState,
     ) -> tuple[int, int, bool, torch.Tensor, object, float]:
         embedding = self.model.base_thinker.get_input_embeddings()
-        if previous_event_id is None:
-            text_embedding = torch.zeros_like(audio_feature)
-            control_embedding = torch.zeros_like(audio_feature)
-        else:
-            previous = torch.tensor(
-                [[previous_event_id]], dtype=torch.long, device=self.device
-            )
-            previous_embedding = embedding(previous)
-            if event_kind(previous_event_id, self.model) is EventKind.TEXT:
-                text_embedding = previous_embedding
-                control_embedding = torch.zeros_like(previous_embedding)
-            else:
-                text_embedding = torch.zeros_like(previous_embedding)
-                control_embedding = previous_embedding
+        text_id, text_mask, control_id, control_mask = frame_event_inputs(
+            previous_event_id, bos_token_id=self.model.base_thinker.config.bos_token_id,
+            control_ids=(self.model.control_tokens.idle, self.model.control_tokens.start,
+                         self.model.control_tokens.stop))
+        text_embedding = embedding(torch.tensor([[text_id]], dtype=torch.long, device=self.device)) * text_mask
+        control_embedding = embedding(torch.tensor([[control_id]], dtype=torch.long, device=self.device)) * control_mask
         fused = audio_feature + text_embedding + control_embedding
         self._sync()
         started = self.clock()
@@ -550,6 +587,9 @@ class QwenDuplexStreamer:
                         state = ResponseState.INACTIVE
                         seen_stop = True
                     if kind is EventKind.TEXT:
+                        if len(lexical_hidden_states) >= self.max_new_tokens:
+                            pending_chunks.clear()
+                            break
                         lexical_hidden_states.append(hidden)
                     audio_time = chunk.start_time_s + min(
                         chunk.end_time_s - chunk.start_time_s,

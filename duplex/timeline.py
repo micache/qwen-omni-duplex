@@ -9,7 +9,8 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any
 
-from .dataset import ConversationRecord, Speaker, WindowMetadata, WordSpan
+from .dataset import ConversationMetadata, ConversationRecord, Speaker, WindowMetadata, WordSpan
+from .contract import frame_event_inputs
 
 
 IGNORE_LABEL = -100
@@ -180,6 +181,7 @@ class CausalTimeline:
     event_types: list[EventKind]
     attention_mask: list[bool]
     frame_times: list[float | None] | None
+    bootstrap_mask: list[bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -275,6 +277,14 @@ class WindowTimeline:
     user_words: tuple[WordSpan, ...] = ()
     interruption: InterruptionMetadata | None = None
     audio_sample_rate_hz: int = 16_000
+
+    @property
+    def conversation_id(self) -> str:
+        return self.sample_id.split("@", 1)[0]
+
+    @property
+    def valid_sequence_length(self) -> int:
+        return len(self.targets.events)
 
 
 def _event_error(sequence: TargetEventSequence, frame: int, message: str) -> ValueError:
@@ -385,11 +395,13 @@ def encode_causal_timeline(
     labels: list[int] = []
     event_types: list[EventKind] = []
     attention_mask: list[bool] = []
+    bootstrap_mask: list[bool] = []
 
     for frame, target in enumerate(events):
         event_types.append(target.kind)
         is_padding = target.kind is EventKind.PADDING
         attention_mask.append(not is_padding)
+        bootstrap_mask.append(frame == 0 and not is_padding)
 
         if is_padding:
             text_ids.append(_MASKED_INPUT_ID)
@@ -405,25 +417,17 @@ def encode_causal_timeline(
         else:
             labels.append(control_tokens.for_event(target.kind))
 
-        if frame == 0:
-            text_ids.append(thinker_bos_token_id)
-            text_mask.append(True)
-            control_ids.append(_MASKED_INPUT_ID)
-            control_mask.append(False)
-            continue
-
-        previous = events[frame - 1]
-        if previous.kind is EventKind.TEXT:
-            assert previous.text_id is not None
-            text_ids.append(previous.text_id)
-            text_mask.append(True)
-            control_ids.append(_MASKED_INPUT_ID)
-            control_mask.append(False)
-        else:
-            text_ids.append(_MASKED_INPUT_ID)
-            text_mask.append(False)
-            control_ids.append(control_tokens.for_event(previous.kind))
-            control_mask.append(True)
+        previous_id = None if frame == 0 else (
+            events[frame - 1].text_id if events[frame - 1].kind is EventKind.TEXT
+            else control_tokens.for_event(events[frame - 1].kind)
+        )
+        text_id, has_text, control_id, has_control = frame_event_inputs(
+            previous_id, bos_token_id=thinker_bos_token_id,
+            control_ids=(control_tokens.idle, control_tokens.start, control_tokens.stop))
+        text_ids.append(text_id)
+        text_mask.append(has_text)
+        control_ids.append(control_id)
+        control_mask.append(has_control)
 
     return CausalTimeline(
         text_ids=text_ids,
@@ -434,6 +438,7 @@ def encode_causal_timeline(
         event_types=event_types,
         attention_mask=attention_mask,
         frame_times=times,
+        bootstrap_mask=bootstrap_mask,
     )
 
 
@@ -883,6 +888,7 @@ def _allocate_token_frames(
     frame_rate_hz: int,
     frame_count: int,
     after_frame: int,
+    allow_time_extension: bool = False,
 ) -> list[int]:
     tokens = alignment.tokens
     turn_start = alignment.source_start_seconds
@@ -904,6 +910,11 @@ def _allocate_token_frames(
     )
     lower = max(first_assistant_frame, 1, after_frame + 2)
     upper = min(last_assistant_frame, frame_count - 2)
+    if allow_time_extension and upper - lower + 1 < len(tokens):
+        # A 25-Hz event stream cannot place several tokens inside a very short
+        # annotated word. Keep every token and move its STOP by the minimum
+        # necessary frames on the complete conversation timeline.
+        upper = min(frame_count - 2, lower + len(tokens) - 1)
     if upper - lower + 1 < len(tokens):
         raise InvalidTimelineError(
             f"sample {sample_id!r}, turn {alignment.source_turn_id!r}, words "
@@ -952,8 +963,13 @@ def build_window_timeline(
     control_tokens: ControlTokenIds,
     thinker_bos_token_id: int,
     frame_rate_hz: int,
+    valid_frame_count: int | None = None,
 ) -> WindowTimeline:
-    """Convert one two-second conversation crop into aligned frame targets."""
+    """Convert one complete crop into aligned frame targets.
+
+    Eight-second spans are supervised as one causal sequence; the audio is
+    still divided into four two-second chunks by the collator.
+    """
 
     if window.conversation_id != record.conversation_id:
         raise ValueError(
@@ -970,14 +986,19 @@ def build_window_timeline(
             f"{record.duration_seconds:.6f}s."
         )
     spec = TimelineSpec(frame_rate_hz=frame_rate_hz)
-    frame_count = spec.frames_per_chunk
+    duration = window.end_seconds - window.start_seconds
+    if not isinstance(window, ConversationMetadata) and not math.isclose(duration, 2.0, abs_tol=1e-9) and not math.isclose(duration, 8.0, abs_tol=1e-9):
+        raise ValueError(f"sample {record.conversation_id!r}: crop must be 2 or 8 seconds.")
+    frame_count = round(duration * frame_rate_hz) if valid_frame_count is None else valid_frame_count
+    if frame_count < 3:
+        raise InvalidTimelineError(f"sample {record.conversation_id!r}: only {frame_count} valid audio frames.")
     sample_id = (
         f"{record.conversation_id}@{window.start_seconds:.6f}.."
         f"{window.end_seconds:.6f}"
     )
 
     start_sample = round(window.start_seconds * record.sample_rate_hz)
-    end_sample = start_sample + round(spec.chunk_seconds * record.sample_rate_hz)
+    end_sample = len(record.user_waveform) if isinstance(window, ConversationMetadata) else start_sample + round(duration * record.sample_rate_hz)
     user_waveform = record.user_waveform[start_sample:end_sample]
     if len(user_waveform) != end_sample - start_sample:
         raise ValueError(
@@ -1002,7 +1023,11 @@ def build_window_timeline(
             and word.span.end_seconds <= window.end_seconds
             for word in turn.words
         )
-        if not overlaps or not complete:
+        if not overlaps:
+            continue
+        if not complete:
+            if isinstance(window, ConversationMetadata):
+                raise InvalidTimelineError(f"sample {sample_id!r}, turn {turn.source_turn_id!r}: annotation extends outside complete audio.")
             continue
         alignment = align_assistant_utterance(
             tokenizer,
@@ -1017,6 +1042,7 @@ def build_window_timeline(
             frame_rate_hz=frame_rate_hz,
             frame_count=frame_count,
             after_frame=last_event_frame,
+            allow_time_extension=isinstance(window, ConversationMetadata),
         )
         start_frame = token_frames[0] - 1
         stop_frame = token_frames[-1] + 1

@@ -10,6 +10,7 @@ import soundfile as sf
 import torch
 
 from duplex.streaming import QwenDuplexStreamer, write_trace_jsonl
+from duplex.contract import DEFAULT_SYSTEM_PROMPT, prompt_token_ids
 from duplex.training import (
     _load_adapter_weights,
     build_training_model,
@@ -18,6 +19,8 @@ from duplex.training import (
 
 
 def _context_token_ids(tokenizer: object, system: str, text_context: str) -> list[int]:
+    if not text_context:
+        return prompt_token_ids(tokenizer, system)
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
@@ -77,7 +80,7 @@ def main() -> None:
     parser.add_argument("--sample-id")
     parser.add_argument(
         "--system",
-        default="You are a concise spoken-dialogue assistant.",
+        default=DEFAULT_SYSTEM_PROMPT,
     )
     parser.add_argument("--text-context", default="")
     parser.add_argument("--max-silent-chunks", type=int, default=4)
