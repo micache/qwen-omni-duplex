@@ -12,8 +12,13 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
 
-from .timeline import IGNORE_LABEL, ControlTokenIds, TimelineSpec
-from .contract import DEFAULT_SYSTEM_PROMPT, prompt_token_ids
+from .timeline import (
+    DEFAULT_SYSTEM_PROMPT,
+    IGNORE_LABEL,
+    ControlTokenIds,
+    TimelineSpec,
+    prompt_token_ids,
+)
 
 
 MODEL_ID = "Qwen/Qwen2.5-Omni-3B"

@@ -44,7 +44,7 @@ lora:
 training:
   method: lora
   run_label: LoRA
-  output_dir: outputs/session08-lora
+  output_dir: outputs/train-lora
   max_steps: 1000
   batch_size: 1
   eval_batch_size: 1

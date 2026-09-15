@@ -82,7 +82,6 @@ def test_trainable_allowlist_accepts_only_targeted_lora_parameters() -> None:
         ("train_lora.yaml", "lora", False, "LoRA"),
         ("train_qlora_16gb.yaml", "qlora", True, "QLoRA"),
         ("debug.yaml", "lora", False, "LoRA"),
-        ("session11_diagnostic.yaml", "lora", False, "LoRA"),
     ],
 )
 def test_checked_in_training_configs_are_explicit(
@@ -98,7 +97,7 @@ def test_checked_in_training_configs_are_explicit(
     assert config["training"]["auto_find_batch_size"] is False
 
 
-def test_session11_evidence_is_promoted_only_to_main_lora_config() -> None:
+def test_main_lora_recipe_uses_contiguous_training_spans() -> None:
     root = Path(__file__).parents[1] / "configs"
     lora = load_training_config(root / "train_lora.yaml")
     qlora = load_training_config(root / "train_qlora_16gb.yaml")
@@ -120,7 +119,7 @@ def test_qlora_cannot_be_activated_by_lora_config() -> None:
 
     config = yaml.safe_load(path.read_text())
     config["model"]["load_in_4bit"] = True
-    temporary = path.parent / ".invalid-session08-test.yaml"
+    temporary = path.parent / ".invalid-training-config.yaml"
     temporary.write_text(yaml.safe_dump(config))
     try:
         with pytest.raises(ValueError, match="requires explicit"):

@@ -1,4 +1,4 @@
-"""Opt-in Session 07 checks against the cached Qwen2.5-Omni checkpoint."""
+"""Opt-in checks against the cached Qwen2.5-Omni checkpoint."""
 
 import gc
 import os

@@ -44,7 +44,7 @@ lora:
 training:
   method: qlora
   run_label: QLoRA
-  output_dir: outputs/session08-qlora
+  output_dir: outputs/train-qlora-16gb
   max_steps: 1000
   batch_size: 1
   eval_batch_size: 1

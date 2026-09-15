@@ -75,7 +75,7 @@ def sample() -> tuple[ConversationRecord, WindowMetadata, CharacterTokenizer]:
     waveform[140:160] = 1.0
     waveform[180:190] = 2.0
     record = ConversationRecord(
-        conversation_id="session-05",
+        conversation_id="interruption-test",
         duration_seconds=2.0,
         sample_rate_hz=100,
         source_sample_rate_hz=100,

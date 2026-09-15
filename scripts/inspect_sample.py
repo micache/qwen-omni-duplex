@@ -39,7 +39,7 @@ def main() -> None:
     parser.add_argument(
         "--timeline",
         action="store_true",
-        help="Print the Session 04 frame/event table for one proposed window.",
+        help="Print the frame/event table for one proposed window.",
     )
     parser.add_argument(
         "--window-index",

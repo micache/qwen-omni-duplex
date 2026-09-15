@@ -10,11 +10,48 @@ from enum import Enum
 from typing import Any
 
 from .dataset import ConversationMetadata, ConversationRecord, Speaker, WindowMetadata, WordSpan
-from .contract import frame_event_inputs
 
 
 IGNORE_LABEL = -100
 _MASKED_INPUT_ID = 0
+DEFAULT_SYSTEM_PROMPT = "You are a concise spoken-dialogue assistant."
+
+
+def prompt_token_ids(
+    tokenizer: object, system_prompt: str = DEFAULT_SYSTEM_PROMPT
+) -> list[int]:
+    """Encode the one shared system prompt without changing tokenizer defaults."""
+
+    template = getattr(tokenizer, "apply_chat_template", None)
+    if callable(template):
+        values = template(
+            [{"role": "system", "content": system_prompt}],
+            tokenize=True,
+            add_generation_prompt=True,
+        )
+        if isinstance(values, Mapping):
+            values = values["input_ids"]
+        if hasattr(values, "tolist"):
+            values = values.tolist()
+        if values and isinstance(values[0], (tuple, list)):
+            values = values[0]
+        return [int(value) for value in values]
+    return list(tokenizer.encode(system_prompt, add_special_tokens=True))
+
+
+def frame_event_inputs(
+    previous_event_id: int | None,
+    *,
+    bos_token_id: int,
+    control_ids: Sequence[int],
+) -> tuple[int, bool, int, bool]:
+    """Return the causal text/control inputs for one timeline position."""
+
+    if previous_event_id is None:
+        return bos_token_id, True, 0, False
+    if previous_event_id in control_ids:
+        return 0, False, previous_event_id, True
+    return previous_event_id, True, 0, False
 
 
 class EventKind(str, Enum):

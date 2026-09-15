@@ -592,7 +592,7 @@ def _batch_value(batch: object, name: str) -> object | None:
 
 
 class DuplexCollator:
-    """Build, optionally augment, and pad Session 05 training examples.
+    """Build, optionally augment, and pad fixed-timeline training examples.
 
     The supplied audio object may be a feature extractor directly or a Qwen
     processor exposing ``feature_extractor``.  This class never calls an audio

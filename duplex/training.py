@@ -1,4 +1,4 @@
-"""Compact Session 08 LoRA/QLoRA training support."""
+"""LoRA and QLoRA training support for the fixed duplex timeline."""
 
 from __future__ import annotations
 
@@ -112,7 +112,7 @@ def _required(mapping: Mapping[str, Any], name: str, path: str) -> Any:
 
 
 def load_training_config(path: str | Path) -> dict[str, Any]:
-    """Read and validate the single Session 08 YAML configuration."""
+    """Read and validate one fixed-timeline training configuration."""
 
     path = Path(path)
     with path.open(encoding="utf-8") as handle:
@@ -129,14 +129,14 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
     lora = config["lora"]
     logging = config["logging"]
     if model.get("name") != MODEL_ID or model.get("component") != MODEL_COMPONENT:
-        raise ValueError("Session 08 supports only Qwen/Qwen2.5-Omni-3B Thinker.")
+        raise ValueError("Training supports only Qwen/Qwen2.5-Omni-3B Thinker.")
     revision = model.get("revision")
     if revision != PINNED_REVISION:
         raise ValueError(f"model.revision must be the pinned commit {PINNED_REVISION}.")
     if model.get("local_files_only") is not True:
-        raise ValueError("Session 08 model loading must remain local_files_only.")
+        raise ValueError("Model loading must remain local_files_only.")
     if timeline.get("chunk_seconds") != 2.0 or timeline.get("frame_rate_hz") != 25:
-        raise ValueError("Session 08 requires fixed 2 s chunks at 25 Hz.")
+        raise ValueError("Training requires fixed 2 s chunks at 25 Hz.")
     if timeline.get("control_events") != ["IDLE", "START", "STOP"]:
         raise ValueError("timeline.control_events must be [IDLE, START, STOP].")
     if timeline.get("control_token_source", "talker") not in {
@@ -150,7 +150,7 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
         "output": OUTPUT,
     }
     if any(task.get(key) != value for key, value in expected_task.items()):
-        raise ValueError(f"task must retain the Session 08 scope: {expected_task}.")
+        raise ValueError(f"task must retain the fixed duplex scope: {expected_task}.")
     if data.get("dataset") != DATASET_VIEW or data.get("synthetic_interruption") is not True:
         raise ValueError("Training data must be DailyTalkContiguous with synthetic interruption.")
 
@@ -240,13 +240,13 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
     if (method == "qlora") != (load_in_4bit is True):
         raise ValueError("QLoRA requires explicit model.load_in_4bit: true; LoRA forbids it.")
     if lora.get("rank") != 16:
-        raise ValueError("Session 08 starts at LoRA rank 16.")
+        raise ValueError("LoRA rank must be 16 for the supported recipe.")
     if lora.get("target_projections") != list(PROJECTION_SUFFIXES):
         raise ValueError(
             "lora.target_projections must contain only q/k/v/o and gate/up/down projections."
         )
     if training.get("bf16") is not True:
-        raise ValueError("Session 08 training requires BF16 (including QLoRA compute).")
+        raise ValueError("Training requires BF16 (including QLoRA compute).")
     if training.get("auto_find_batch_size", False):
         raise ValueError("Automatic OOM fallback is forbidden; select the QLoRA config explicitly.")
     for name in (
@@ -382,8 +382,7 @@ def assert_only_allowed_lora_trainable(
 
 
 def _remove_vision_tower(thinker: nn.Module) -> None:
-    # The Session 06 direct Thinker route established that vision is unused and
-    # safe to prune after it has been explicitly frozen.
+    # Vision is unused by the Thinker-only audio/text path.
     if hasattr(thinker, "visual"):
         del thinker.visual
         gc.collect()
@@ -394,7 +393,7 @@ def build_training_model(config: Mapping[str, Any]) -> tuple[QwenDuplexThinker, 
     """Load the pinned direct Thinker and inject adapters only into discovered text layers."""
 
     if not torch.cuda.is_available():
-        raise RuntimeError("Session 08 BF16 LoRA/QLoRA training requires an available CUDA GPU.")
+        raise RuntimeError("BF16 LoRA/QLoRA training requires an available CUDA GPU.")
     if not torch.cuda.is_bf16_supported():
         raise RuntimeError("The selected CUDA GPU does not report BF16 support.")
 
@@ -500,7 +499,7 @@ def _synthetic_samples(count: int, *, split: Split, seed: int) -> list[TimelineS
         frequency = 180.0 + 20.0 * index
         waveform = (0.05 * np.sin(2 * np.pi * frequency * time)).astype(np.float32)
         waveform += rng.normal(0.0, 0.001, waveform.shape).astype(np.float32)
-        conversation_id = f"session08-{split.value}-{index}"
+        conversation_id = f"synthetic-{split.value}-{index}"
         record = ConversationRecord(
             conversation_id=conversation_id,
             duration_seconds=2.0,
@@ -632,7 +631,7 @@ def build_datasets_and_collator(
         root = Path(root_value)
         manifest = root / data.get("manifest", "dailytalk.jsonl")
         entries = read_manifest(manifest)
-        split_salt = f"DailyTalkContiguous-session08-{training['split_seed']}"
+        split_salt = f"DailyTalkContiguous-{training['split_seed']}"
         train_values: list[TimelineSample] = []
         eval_values: list[TimelineSample] = []
         label_map = data.get("speaker_label_map")
@@ -734,7 +733,7 @@ class GradientAuditCallback(TrainerCallback):
             self.nonzero_gradient_names.add(name)
 
 
-class Session08Trainer(Trainer):
+class DuplexTrainer(Trainer):
     """Trainer that consumes the wrapper loss and emits duplex diagnostics."""
 
     def __init__(
@@ -977,9 +976,9 @@ def make_trainer(
     collator: DuplexCollator,
     *,
     max_steps: int | None = None,
-) -> tuple[Session08Trainer, GradientAuditCallback]:
+) -> tuple[DuplexTrainer, GradientAuditCallback]:
     audit = GradientAuditCallback(targets)
-    trainer = Session08Trainer(
+    trainer = DuplexTrainer(
         model=model,
         args=make_training_arguments(config, max_steps=max_steps),
         train_dataset=train_dataset,
@@ -1008,7 +1007,7 @@ def assert_optimizer_scope(trainer: Trainer) -> None:
 def _timeline_values(dataset: Dataset) -> tuple[WindowTimeline, ...]:
     values = getattr(dataset, "values", None)
     if values is None or not all(isinstance(value, WindowTimeline) for value in values):
-        raise TypeError("Session 09 requires a prebuilt fixed WindowTimeline dataset.")
+        raise TypeError("Overfit validation requires prebuilt fixed timelines.")
     return tuple(values)
 
 
@@ -1129,7 +1128,7 @@ def _cached_free_prediction(
 ) -> list[int]:
     attention = batch["attention_mask"].bool()
     if attention.shape[0] != 1 or not bool(attention.all()):
-        raise ValueError("Cached Session 09 generation requires one unpadded timeline.")
+        raise ValueError("Cached validation requires one unpadded timeline.")
     timeline_length = attention.shape[1]
     embedding = model.base_thinker.get_input_embeddings()
     audio_embeddings = model._restore_audio(
@@ -1205,7 +1204,7 @@ def _cached_free_report(
     }
 
 
-def _write_session09_preflight(
+def _write_overfit_preflight(
     output_dir: Path,
     dataset: Dataset,
 ) -> dict[str, Any]:
@@ -1239,7 +1238,7 @@ def _write_session09_preflight(
     histogram[EventKind.PADDING.value] += 0
     interrupted = [timeline for timeline in timelines if timeline.interruption is not None]
     if not interrupted:
-        raise RuntimeError("Session 09 preflight found no deterministic interruption.")
+        raise RuntimeError("Overfit preflight found no deterministic interruption.")
     report = {
         "label_histogram": dict(sorted(histogram.items())),
         "causal_shift_check": "passed",
@@ -1267,11 +1266,11 @@ def _write_session09_preflight(
         handle.write("\n")
     table = format_timeline_table(interrupted[0])
     (output_dir / "decoded_timeline.txt").write_text(table + "\n", encoding="utf-8")
-    print("Session 09 exact label histogram:", json.dumps(report["label_histogram"], sort_keys=True))
-    print("Session 09 decoded interrupted timeline:\n" + table)
+    print("Exact label histogram:", json.dumps(report["label_histogram"], sort_keys=True))
+    print("Decoded interrupted timeline:\n" + table)
     required = (EventKind.IDLE.value, EventKind.START.value, EventKind.TEXT.value, EventKind.STOP.value)
     if any(histogram[name] == 0 for name in required):
-        raise RuntimeError(f"Session 09 preflight is missing required labels: {histogram}.")
+        raise RuntimeError(f"Overfit preflight is missing required labels: {histogram}.")
     return report
 
 
@@ -1298,7 +1297,7 @@ def _training_trend(path: Path) -> dict[str, Any]:
     }
 
 
-def _session09_gate(
+def _overfit_gate(
     baseline: Mapping[str, Any],
     teacher: Mapping[str, Any],
     free: Mapping[str, Any],
@@ -1340,7 +1339,7 @@ def _session09_gate(
     return not failures, failures
 
 
-def train_from_config(config: Mapping[str, Any]) -> Session08Trainer | SimpleNamespace:
+def train_from_config(config: Mapping[str, Any]) -> DuplexTrainer:
     """Run the configured job; callers decide whether it is a smoke or real dataset run."""
 
     seed_everything(config["training"]["seed"])
@@ -1348,20 +1347,6 @@ def train_from_config(config: Mapping[str, Any]) -> Session08Trainer | SimpleNam
     model, processor, targets = build_training_model(config)
     train_dataset, eval_dataset, collator = build_datasets_and_collator(
         config, processor, model
-    )
-    session09 = config["data"].get("selected_windows") is not None
-    output_dir = Path(config["training"]["output_dir"])
-    if session09 and (output_dir / "metrics.jsonl").exists() and not config["training"].get(
-        "resume_from_checkpoint"
-    ):
-        raise FileExistsError(
-            f"Refusing to append a fresh Session 09 run to {output_dir / 'metrics.jsonl'}."
-        )
-    preflight = _write_session09_preflight(output_dir, train_dataset) if session09 else None
-    baseline = (
-        _teacher_forced_report(model, train_dataset, collator, processor.tokenizer)
-        if session09
-        else None
     )
     trainer, audit = make_trainer(
         config, model, processor, targets, train_dataset, eval_dataset, collator
@@ -1372,10 +1357,9 @@ def train_from_config(config: Mapping[str, Any]) -> Session08Trainer | SimpleNam
     if any(parameter.grad is not None for parameter in model.base_thinker.audio_tower.parameters()):
         raise RuntimeError("Frozen audio tower retained gradients.")
     assert_optimizer_scope(trainer)
-    final = output_dir / "final"
+    final = Path(config["training"]["output_dir"]) / "final"
     trainer.save_model(final)
-    if not session09:
-        return trainer
+    return trainer
 
     assert preflight is not None and baseline is not None
     step_count = trainer.state.global_step
@@ -1398,7 +1382,7 @@ def train_from_config(config: Mapping[str, Any]) -> Session08Trainer | SimpleNam
 
     seed_everything(config["training"]["seed"])
     reloaded_model, reloaded_processor, reloaded_targets = build_training_model(config)
-    _load_adapter_weights(reloaded_model, final)
+    load_adapter_weights(reloaded_model, final)
     reloaded_train, _, reloaded_collator = build_datasets_and_collator(
         config, reloaded_processor, reloaded_model
     )
@@ -1425,7 +1409,7 @@ def train_from_config(config: Mapping[str, Any]) -> Session08Trainer | SimpleNam
         example["prediction_ids"] for example in reloaded_free["examples"]
     ]:
         raise AssertionError("Cached/free predictions changed after adapter reload.")
-    passed, failures = _session09_gate(
+    passed, failures = _overfit_gate(
         baseline,
         teacher,
         free,
@@ -1469,7 +1453,7 @@ def train_from_config(config: Mapping[str, Any]) -> Session08Trainer | SimpleNam
         print("Gate failures:", "; ".join(failures))
     return SimpleNamespace(
         state=SimpleNamespace(global_step=step_count),
-        session09_report=report,
+        overfit_report=report,
     )
 
 
@@ -1493,7 +1477,7 @@ def _reference_logits(model: nn.Module, batch: Mapping[str, torch.Tensor]) -> to
     return logits.detach().cpu()
 
 
-def _load_adapter_weights(model: QwenDuplexThinker, checkpoint: Path) -> None:
+def load_adapter_weights(model: QwenDuplexThinker, checkpoint: Path) -> None:
     from peft.utils.save_and_load import load_peft_weights, set_peft_model_state_dict
 
     weights = load_peft_weights(str(checkpoint), device="cpu", local_files_only=True)
@@ -1508,13 +1492,13 @@ def _release_cuda_objects(*objects: object) -> None:
     torch.cuda.empty_cache()
 
 
-def run_smoke_from_config(config: Mapping[str, Any]) -> Session08Trainer:
+def run_smoke_from_config(config: Mapping[str, Any]) -> DuplexTrainer:
     """Run two steps, reload the adapter, then resume for exactly one more step."""
 
     if not config["data"].get("synthetic_smoke", False):
         raise ValueError("Smoke verification requires data.synthetic_smoke: true.")
     if config["training"]["max_steps"] != 2:
-        raise ValueError("The Session 08 smoke config must begin with exactly two steps.")
+        raise ValueError("The smoke configuration must begin with exactly two steps.")
     seed_everything(config["training"]["seed"])
     torch.cuda.reset_peak_memory_stats()
     model, processor, targets = build_training_model(config)
@@ -1545,7 +1529,7 @@ def run_smoke_from_config(config: Mapping[str, Any]) -> Session08Trainer:
 
     seed_everything(config["training"]["seed"])
     resumed_model, resumed_processor, resumed_targets = build_training_model(config)
-    _load_adapter_weights(resumed_model, checkpoint)
+    load_adapter_weights(resumed_model, checkpoint)
     reloaded = _reference_logits(resumed_model, fixed_batch)
     max_abs_difference = float((reference.float() - reloaded.float()).abs().max())
     torch.testing.assert_close(reloaded, reference, rtol=1e-3, atol=1e-3)

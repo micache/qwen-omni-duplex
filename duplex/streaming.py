@@ -6,7 +6,6 @@ import math
 import re
 import time
 from contextlib import nullcontext
-from .contract import DEFAULT_SYSTEM_PROMPT, frame_event_inputs, prompt_token_ids
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -15,7 +14,13 @@ import numpy as np
 import torch
 
 from .model import QwenDuplexThinker
-from .timeline import EventKind, ResponseState
+from .timeline import (
+    DEFAULT_SYSTEM_PROMPT,
+    EventKind,
+    ResponseState,
+    frame_event_inputs,
+    prompt_token_ids,
+)
 
 
 AUDIO_SAMPLE_RATE_HZ = 16_000
@@ -212,7 +217,7 @@ def grammar_mask_logits(
     state: ResponseState,
     model: QwenDuplexThinker,
 ) -> tuple[torch.Tensor, int, bool]:
-    """Apply the Session 02 event grammar and retain the raw argmax diagnosis."""
+    """Apply the event grammar and retain the raw argmax diagnosis."""
 
     if logits.ndim != 1:
         raise ValueError("Event logits must be a one-dimensional vocabulary vector.")

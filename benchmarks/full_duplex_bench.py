@@ -701,12 +701,12 @@ class DuplexTimelineBackend:
     """Adapter-active fixed-two-second streamer returning its native trace."""
 
     def __init__(self, settings: RunSettings) -> None:
-        from duplex.training import _load_adapter_weights, build_training_model, load_training_config
+        from duplex.training import build_training_model, load_adapter_weights, load_training_config
         assert settings.adapter is not None
         config = load_training_config(settings.adapter / "training_config.yaml")
         config["model"]["local_files_only"] = not settings.allow_download
         self.model, self.processor, _ = build_training_model(config)
-        _load_adapter_weights(self.model, settings.adapter)
+        load_adapter_weights(self.model, settings.adapter)
         self.model.eval()
         self.settings = settings
 
