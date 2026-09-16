@@ -854,3 +854,20 @@ it is not a ready main checkpoint. Exact commands, hashes, metrics, and failures
 are in `notes/experiments.md`.
 
 Stop boundary: Session 15 ends here. No benchmark judging was started.
+
+## Session 16 — full TASTE training launch
+
+The full TASTE-IF-SFT-48K LoRA run was restarted with batch size eight after
+batch-one through batch-six diagnostic launches demonstrated headroom on a 24
+GB RTX 3090. The batch-one launch stopped after 580 unsaved optimizer steps;
+batch two stopped after 230 steps with a 13.61 GB peak reservation; batch four
+stopped after 30 steps with an 11.82 GB peak reservation; and batch six stopped
+after 20 steps with a 13.72 GB peak reservation. No training state is reused.
+The output directory is `outputs/turn-packed-main-batch8` to preserve the
+diagnostic logs separately.
+
+The weighted next-event loss remains text=1.0, IDLE=0.1, START=4.0, STOP=4.0.
+The logged group losses are unweighted diagnostic cross-entropies; the higher
+lexical loss does not mean the weighted objective favors IDLE. No weight change
+was made because the data view and synthetic-interruption probability remain
+the values used to derive the checked-in weights.

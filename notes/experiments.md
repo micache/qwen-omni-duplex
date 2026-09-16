@@ -435,6 +435,20 @@ safetensors digest is
 `outputs/session15-main-111b/selected/` contains only the adapter and project
 metadata, with no redistributed Qwen base weights.
 
+## 2026-09-16 — TASTE full-run batch-size adjustment
+
+The first TASTE full-data launch used the checked-in weighted objective and
+batch size one. It was stopped after 580 unsaved steps to use the observed
+headroom on an RTX 3090: peak reserved memory was 10.53 GB of 24 GB. The
+second launch used batch size two and stopped after 230 unsaved steps: its
+peak reserved memory was 13.61 GB. Batch size four then completed 30 steps
+with an 11.82 GB peak reservation, and batch size six completed 20 steps with
+a 13.72 GB peak reservation. The current full run uses batch size eight and
+`outputs/turn-packed-main-batch8`, preserving the initial metrics as
+diagnostic evidence. The loss weights remain text=1.0, IDLE=0.1, START=4.0,
+STOP=4.0; raw per-group cross-entropies are diagnostics and are intentionally
+not used as a reason to change the precomputed global weighting.
+
 Fresh-process loading of that adapter passed. The three cases and full traces
 are in `outputs/session15-main-111b/fresh_verify/report.json`. With the frozen
 system prompt, the wait case emitted 11 START and 11 STOP events, including

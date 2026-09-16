@@ -40,11 +40,11 @@ lora:
 training:
   method: lora
   run_label: LoRA
-  output_dir: outputs/turn-packed-main
+  output_dir: outputs/turn-packed-main-batch8
   max_steps: null
   num_train_epochs: 3
-  batch_size: 1
-  eval_batch_size: 1
+  batch_size: 8
+  eval_batch_size: 8
   gradient_accumulation_steps: 1
   learning_rate: 0.0002
   lr_scheduler_type: constant
