@@ -29,10 +29,9 @@ data:
     max_snr_db: 20.0
 loss_weights:
   text: 1.0
-  idle: 1.0
-  start: 1.0
-  stop: 1.0
-loss_weight_max_ratio: 5.0
+  idle: 0.1
+  start: 4.0
+  stop: 4.0
 lora:
   rank: 16
   alpha: 32

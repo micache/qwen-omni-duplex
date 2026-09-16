@@ -1,0 +1,45 @@
+{
+  "base_counts": {
+    "idle": 5825957.0,
+    "start": 44000.0,
+    "stop": 44000.0,
+    "text": 347793.0
+  },
+  "conversations": 44000,
+  "expected_augmented_counts_per_epoch": {
+    "idle": 5851670.499999984,
+    "start": 44000.0,
+    "stop": 44000.0,
+    "text": 322079.5000000154
+  },
+  "diagnostic_capped_inverse_sqrt_weights": {
+    "idle": 0.5411095503265114,
+    "start": 2.7055477516325572,
+    "stop": 2.7055477516325572,
+    "text": 1.0
+  },
+  "exact_idle_weight_for_equal_idle_text_mass": 0.05504060763503624,
+  "interruption_eligible_conversations": 37821,
+  "interruption_probability": 0.2,
+  "minimum_assistant_capacity_margin_frames": 1,
+  "selected_expected_weighted_fraction": {
+    "idle": 0.46469617089678884,
+    "start": 0.1397661164924392,
+    "stop": 0.1397661164924392,
+    "text": 0.2557715961183327
+  },
+  "selected_expected_weighted_mass": {
+    "idle": 585167.0499999984,
+    "start": 176000.0,
+    "stop": 176000.0,
+    "text": 322079.5000000154
+  },
+  "selected_full_training_weights": {
+    "idle": 0.1,
+    "start": 4.0,
+    "stop": 4.0,
+    "text": 1.0
+  },
+  "split": "train",
+  "total_frames": 6261750
+}

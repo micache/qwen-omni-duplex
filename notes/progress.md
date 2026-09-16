@@ -18,6 +18,14 @@ only TASTE `data/*.parquet` and MUSAN `noise/*.parquet`. The local snapshot was
 validated as 44,000 train plus 4,000 dev conversations and two MUSAN noise
 shards. No model weights were downloaded.
 
+The full 44,000-conversation training split was then scanned with the pinned
+Qwen tokenizer and exact Qwen audio-length arithmetic. At 20% interruption,
+the expected per-epoch counts are 5,851,670.5 IDLE, 322,079.5 text, 44,000
+START, and 44,000 STOP. The main configuration now uses weights 0.1/1.0/4.0/4.0
+for IDLE/text/START/STOP. This leaves IDLE as the largest aggregate contribution
+(46.47%) while preventing its raw 18.17:1 frequency advantage from dominating
+the objective; text contributes 25.58%, and each boundary contributes 13.98%.
+
 ## Session 01 — scaffold and scope contract
 
 Status: scaffold complete; pytest invocation is blocked by the uninstalled local

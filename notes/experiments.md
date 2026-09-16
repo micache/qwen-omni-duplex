@@ -13,6 +13,16 @@ packing, all-IDLE user targets, early STOP plus user-audio overlay for
 interruption, and measured 10 dB noise mixing. No optimizer step, model load,
 or benchmark was run.
 
+The subsequent full training-label scan covered all 44,000 train rows. Before
+augmentation it found 5,825,957 IDLE and 347,793 text events plus 44,000 each
+of START and STOP. Modeling the configured 20% interruption probability gives
+expected counts of 5,851,670.5 IDLE and 322,079.5 text per epoch. Exact
+IDLE/text aggregate balancing would use IDLE weight 0.05504 at text weight 1,
+but that would remove the intended conservative silence bias. The selected
+full-run weights are IDLE 0.1, text 1.0, START 4.0, STOP 4.0, producing expected
+weighted fractions 46.47%, 25.58%, 13.98%, and 13.98%. The minimum assistant
+capacity margin across the split was one frame, so no sample overflowed.
+
 Session 01 created structure and executable scope checks only; later dated
 entries record the first local probes and experiments.
 

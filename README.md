@@ -108,6 +108,11 @@ uniform SNR range. Synthetic interruption is also sampled on the fly: donor
 user speech is overlaid during an assistant-silence block and the target emits
 `STOP` at the overlap onset.
 
+The full training loss uses `text=1.0`, `IDLE=0.1`, `START=4.0`, and
+`STOP=4.0`. These weights come from the checked-in full-train histogram rather
+than a batch-local estimate; rerun `scripts/analyze_turn_packed_weights.py` if
+the data view or interruption probability changes.
+
 ### Legacy DailyTalk preparation
 
 The expected dataset layout contains `dailytalk.jsonl` and `data_stereo/` under
