@@ -1,5 +1,23 @@
 # Progress
 
+## 2026-09-16 — turn-packed spoken-instruction view
+
+Replaced timestamp-spread response targets in the current recipe with an
+explicit turn-packed representation. Each TASTE-IF-SFT-48K row remains one
+complete conversation. Its user waveform is followed by silence equal to the
+decoded response-waveform length. User frames are IDLE; the assistant block is
+START, contiguous response BPEs, STOP, then IDLE. The existing causal shift,
+25 Hz timeline, fixed two-second audio chunking, additive fusion, and weighted
+next-event objective are unchanged.
+
+Added a local default-config TASTE reader, strict two-turn/audio validation,
+MUSAN noise-only loading, measured-SNR on-the-fly mixing, and cross-sample
+synthetic user-speech interruption during assistant silence. Added
+`configs/turn_packed_main.yaml` and an explicit preparation CLI that downloads
+only TASTE `data/*.parquet` and MUSAN `noise/*.parquet`. The local snapshot was
+validated as 44,000 train plus 4,000 dev conversations and two MUSAN noise
+shards. No model weights were downloaded.
+
 ## Session 01 — scaffold and scope contract
 
 Status: scaffold complete; pytest invocation is blocked by the uninstalled local

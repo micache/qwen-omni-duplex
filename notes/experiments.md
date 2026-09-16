@@ -1,5 +1,18 @@
 # Experiments
 
+## 2026-09-16 — turn-packed data-path correctness check
+
+This was a data-path check, not a training run. The selected public
+TASTE-IF-SFT-48K default config and MUSAN noise-only config were downloaded
+locally. The former reconstructed to about 12 GB and contains 44,000 train and
+4,000 development conversations; the latter is about 696 MB in two Parquet
+shards. A decoded development sample retained its real 41,796-sample user
+waveform, replaced the 38,639-sample response waveform with exact zeros, and
+retained the response text. Synthetic tests checked contiguous response-token
+packing, all-IDLE user targets, early STOP plus user-audio overlay for
+interruption, and measured 10 dB noise mixing. No optimizer step, model load,
+or benchmark was run.
+
 Session 01 created structure and executable scope checks only; later dated
 entries record the first local probes and experiments.
 

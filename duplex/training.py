@@ -55,6 +55,13 @@ from .timeline import (
     build_window_timeline,
     format_timeline_table,
 )
+from .turn_packed import (
+    DATASET_VIEW as TURN_PACKED_DATASET_VIEW,
+    MusanNoiseDataset,
+    NoiseAugmentationConfig,
+    TurnPackedCollator,
+    load_local_taste,
+)
 
 
 PROJECTION_SUFFIXES = (
@@ -151,8 +158,20 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
     }
     if any(task.get(key) != value for key, value in expected_task.items()):
         raise ValueError(f"task must retain the Session 08 scope: {expected_task}.")
-    if data.get("dataset") != DATASET_VIEW or data.get("synthetic_interruption") is not True:
-        raise ValueError("Training data must be DailyTalkContiguous with synthetic interruption.")
+    if data.get("dataset") not in {DATASET_VIEW, TURN_PACKED_DATASET_VIEW}:
+        raise ValueError(
+            f"Training data must be {DATASET_VIEW} or {TURN_PACKED_DATASET_VIEW}."
+        )
+    if data.get("synthetic_interruption") is not True:
+        raise ValueError("Training data must enable synthetic interruption.")
+
+    if data.get("dataset") == TURN_PACKED_DATASET_VIEW:
+        noise = _mapping(data.get("noise", {}), "data.noise")
+        probability = float(noise.get("probability", 0.0))
+        if not 0.0 <= probability <= 1.0:
+            raise ValueError("data.noise.probability must be in [0, 1].")
+        if probability > 0.0 and not noise.get("root"):
+            raise ValueError("data.noise.root is required when noise is enabled.")
 
     span_seconds = data.get("contiguous_span_seconds")
     if span_seconds is not None:
@@ -526,11 +545,49 @@ def _synthetic_samples(count: int, *, split: Split, seed: int) -> list[TimelineS
 
 def build_datasets_and_collator(
     config: Mapping[str, Any], processor: object, duplex: QwenDuplexThinker
-) -> tuple[Dataset, Dataset | None, DuplexCollator]:
-    """Build deterministic DailyTalkContiguous views or the explicit smoke fixture."""
+) -> tuple[Dataset, Dataset | None, object]:
+    """Build the configured complete-conversation view and its collator."""
 
     data = config["data"]
     training = config["training"]
+    if data.get("dataset") == TURN_PACKED_DATASET_VIEW:
+        root = data.get("root")
+        if not isinstance(root, str) or not root:
+            raise ValueError("data.root must point to a local TASTE snapshot.")
+        train_dataset = load_local_taste(
+            root, split="train", max_samples=data.get("max_train_samples")
+        )
+        evaluate = training.get("eval_strategy", "no") != "no"
+        eval_dataset = (
+            load_local_taste(root, split="dev", max_samples=data.get("max_eval_samples"))
+            if evaluate
+            else None
+        )
+        noise_options = _mapping(data.get("noise", {}), "data.noise")
+        noise_config = NoiseAugmentationConfig(
+            probability=float(noise_options.get("probability", 0.0)),
+            min_snr_db=float(noise_options.get("min_snr_db", 5.0)),
+            max_snr_db=float(noise_options.get("max_snr_db", 20.0)),
+        )
+        noise_dataset = (
+            MusanNoiseDataset(noise_options["root"])
+            if noise_config.probability > 0.0
+            else None
+        )
+        collator = TurnPackedCollator(
+            audio_processor=processor,
+            audio_tower=duplex.base_thinker.audio_tower,
+            tokenizer=processor.tokenizer,
+            control_tokens=duplex.control_tokens,
+            thinker_bos_token_id=duplex.base_thinker.config.bos_token_id,
+            interruption_probability=float(data.get("interruption_probability", 0.0)),
+            min_assistant_frames=int(data.get("min_assistant_frames", 1)),
+            noise_dataset=noise_dataset,
+            noise_config=noise_config,
+            augmentation_seed=int(training["interruption_seed"]),
+        )
+        return train_dataset, eval_dataset, collator
+
     selected_windows = data.get("selected_windows")
     prebuilt_interruption = selected_windows is not None
     if selected_windows is not None:

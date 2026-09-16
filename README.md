@@ -6,9 +6,11 @@ text-only full-duplex dialogue. The model listens to user audio in fixed
 two-second windows and predicts one next event every 40 ms: a text token,
 `IDLE`, `START`, or `STOP`.
 
-The project uses the public
-[DailyTalkContiguous](https://huggingface.co/datasets/kyutai/DailyTalkContiguous)
-dataset and creates synthetic interruptions for overlap training. It is based
+The current training recipe uses the public
+[TASTE-IF-SFT-48K](https://huggingface.co/datasets/Jaylin0418/TASTE-IF-SFT-48K)
+spoken instruction dataset and creates synthetic interruptions for overlap
+training. The older DailyTalkContiguous reader remains available for reproducing
+the earlier timestamp-aligned experiments. It is based
 on the Thinker/audio tower from Qwen2.5-Omni, but it does not train the Talker,
 generate speech, or add a separate controller.
 
@@ -18,9 +20,13 @@ running a larger training experiment.
 
 ## Method
 
-Each example is a two-second chunk with 50 positions at 25 Hz. The input at a
-position contains the previous causal text or control event, while the label is
-the current event to predict.
+Each example is one complete conversation, encoded in fixed two-second audio
+chunks with 25 positions per second. The user block contains the real user
+waveform and only `IDLE` targets. The assistant block contains silence with the
+same duration as the reference response waveform; its targets are packed as
+`START`, the contiguous response tokens, `STOP`, then `IDLE` for the rest of
+the block. Word timestamps are not used. The input at a position contains the
+previous causal text or control event, while the label is the current event.
 
 ```text
 user audio       -> Qwen audio tower -------------------+
@@ -48,7 +54,8 @@ loss = sum(weight[target] * cross_entropy(logits, target))
 ```
 
 Text, `IDLE`, `START`, and `STOP` have independently configurable weights.
-Padding is ignored.
+Batch padding is ignored. Thinker-native PAD/BOS/EOS rows represent
+`IDLE`/`START`/`STOP`, respectively.
 
 ## Current status
 
@@ -86,6 +93,22 @@ The pinned environment uses PyTorch 2.10.0 with CUDA 12.6 and Transformers
 compatibility path; SDPA is the tested attention implementation.
 
 ## Dataset preparation
+
+The selected TASTE default layout is about 12 GB and contains 44,000 training
+and 4,000 development conversations. MUSAN's noise-only config adds about
+696 MB. Download and validate only those subsets with:
+
+```bash
+.venv/bin/python scripts/prepare_turn_packed_data.py --download
+```
+
+The runnable recipe is `configs/turn_packed_main.yaml`. Its `noise.probability`
+controls on-the-fly MUSAN mixing; `min_snr_db` and `max_snr_db` control the
+uniform SNR range. Synthetic interruption is also sampled on the fly: donor
+user speech is overlaid during an assistant-silence block and the target emits
+`STOP` at the overlap onset.
+
+### Legacy DailyTalk preparation
 
 The expected dataset layout contains `dailytalk.jsonl` and `data_stereo/` under
 one directory. To validate an existing local copy and create a deterministic
