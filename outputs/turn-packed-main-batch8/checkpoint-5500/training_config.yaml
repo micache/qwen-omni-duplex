@@ -1,0 +1,95 @@
+model:
+  name: Qwen/Qwen2.5-Omni-3B
+  revision: f75b40e3da2003cdd6e1829b1f420ca70797c34e
+  component: thinker
+  local_files_only: true
+  load_in_4bit: false
+timeline:
+  chunk_seconds: 2.0
+  frame_rate_hz: 25
+  control_events:
+  - IDLE
+  - START
+  - STOP
+  control_token_source: thinker_native
+task:
+  fusion: additive_audio_text_control
+  objective: weighted_next_event
+  output: text_only
+data:
+  dataset: TASTE-IF-SFT-48K
+  root: data/TASTE-IF-SFT-48K
+  complete_conversations: true
+  synthetic_interruption: true
+  interruption_probability: 0.2
+  min_assistant_frames: 4
+  max_train_samples: null
+  max_eval_samples: null
+  noise:
+    root: data/musan
+    probability: 0.2
+    min_snr_db: 5.0
+    max_snr_db: 20.0
+loss_weights:
+  text: 1.0
+  idle: 0.1
+  start: 4.0
+  stop: 4.0
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  target_projections:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+training:
+  method: lora
+  run_label: LoRA
+  output_dir: outputs/turn-packed-main-batch8
+  max_steps: null
+  num_train_epochs: 3
+  batch_size: 8
+  eval_batch_size: 8
+  gradient_accumulation_steps: 1
+  learning_rate: 0.0002
+  lr_scheduler_type: constant
+  weight_decay: 0.0
+  warmup_steps: 0
+  max_grad_norm: 1.0
+  bf16: true
+  gradient_checkpointing: true
+  eval_strategy: epoch
+  eval_steps: null
+  save_strategy: epoch
+  save_steps: null
+  save_total_limit: 3
+  optimizer: adamw_torch
+  dataloader_num_workers: 0
+  auto_find_batch_size: false
+  full_determinism: false
+  seed: 211
+  split_seed: 212
+  window_seed: 213
+  interruption_seed: 214
+  resume_from_checkpoint: null
+diagnostic:
+  validation_traces: 6
+  report: outputs/turn-packed-main/report.json
+  trace_directory: outputs/turn-packed-main/traces
+generation:
+  decoding: greedy
+  system: You are a concise spoken-dialogue assistant.
+  max_silent_chunks: 1
+  temperature: 1.0
+  top_k: null
+  sample: false
+logging:
+  backends:
+  - jsonl
+  steps: 10
+  disable_tqdm: true

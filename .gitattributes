@@ -1,0 +1,4 @@
+outputs/turn-packed-main-batch8/epoch1_generation_inputs/*.wav filter=lfs diff=lfs merge=lfs -text
+outputs/turn-packed-main-batch8/checkpoint-*/*.safetensors filter=lfs diff=lfs merge=lfs -text
+outputs/turn-packed-main-batch8/checkpoint-*/*.pt filter=lfs diff=lfs merge=lfs -text
+outputs/turn-packed-main-batch8/checkpoint-*/*.pth filter=lfs diff=lfs merge=lfs -text

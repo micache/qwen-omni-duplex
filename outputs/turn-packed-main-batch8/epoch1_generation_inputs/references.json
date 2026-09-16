@@ -1,0 +1,20 @@
+[
+  {
+    "index": 0,
+    "conversation_id": "read_aloud_010890",
+    "audio": "outputs/turn-packed-main-batch8/epoch1_generation_inputs/00-read_aloud_010890.wav",
+    "reference_assistant_text": "Baseball, boxing, football, soccer, and hockey."
+  },
+  {
+    "index": 1,
+    "conversation_id": "read_aloud_010838",
+    "audio": "outputs/turn-packed-main-batch8/epoch1_generation_inputs/01-read_aloud_010838.wav",
+    "reference_assistant_text": "Bears, wolves, eagles, and sharks."
+  },
+  {
+    "index": 2,
+    "conversation_id": "read_aloud_012247",
+    "audio": "outputs/turn-packed-main-batch8/epoch1_generation_inputs/02-read_aloud_012247.wav",
+    "reference_assistant_text": "A whisk, a blender, and a spatula."
+  }
+]
