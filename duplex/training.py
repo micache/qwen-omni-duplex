@@ -60,6 +60,7 @@ from .turn_packed import (
     MusanNoiseDataset,
     NoiseAugmentationConfig,
     TurnPackedCollator,
+    TasteConversationDataset,
     load_local_taste,
 )
 
@@ -166,6 +167,14 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
         raise ValueError("Training data must enable synthetic interruption.")
 
     if data.get("dataset") == TURN_PACKED_DATASET_VIEW:
+        sample_id = data.get("overfit_sample_id")
+        if sample_id is not None:
+            if not isinstance(sample_id, str) or not sample_id:
+                raise ValueError("data.overfit_sample_id must be a non-empty TASTE idx.")
+            if data.get("overfit_split") not in {"train", "dev"}:
+                raise ValueError("data.overfit_split must be train or dev.")
+            if data.get("overfit_subset") is not True or not data.get("complete_conversations"):
+                raise ValueError("A TASTE one-sample run requires overfit_subset and complete_conversations.")
         noise = _mapping(data.get("noise", {}), "data.noise")
         probability = float(noise.get("probability", 0.0))
         if not 0.0 <= probability <= 1.0:
@@ -554,10 +563,22 @@ def build_datasets_and_collator(
         root = data.get("root")
         if not isinstance(root, str) or not root:
             raise ValueError("data.root must point to a local TASTE snapshot.")
-        train_dataset = load_local_taste(
-            root, split="train", max_samples=data.get("max_train_samples")
-        )
-        evaluate = training.get("eval_strategy", "no") != "no"
+        sample_id = data.get("overfit_sample_id")
+        if sample_id is None:
+            train_dataset = load_local_taste(
+                root, split="train", max_samples=data.get("max_train_samples")
+            )
+        else:
+            source = load_local_taste(root, split=data["overfit_split"])
+            matches = [index for index, value in enumerate(source.dataset["idx"])
+                       if value == sample_id]
+            if len(matches) != 1:
+                raise ValueError(
+                    f"TASTE {data['overfit_split']} must contain exactly one {sample_id!r}; "
+                    f"found {len(matches)}."
+                )
+            train_dataset = TasteConversationDataset(source.dataset.select(matches))
+        evaluate = sample_id is None and training.get("eval_strategy", "no") != "no"
         eval_dataset = (
             load_local_taste(root, split="dev", max_samples=data.get("max_eval_samples"))
             if evaluate
@@ -1193,6 +1214,7 @@ def _cached_free_prediction(
         input_features=batch["input_features"],
         feature_attention_mask=batch["feature_attention_mask"],
         preconv_feature_lengths=batch["preconv_feature_lengths"],
+        audio_chunk_counts=batch["audio_chunk_counts"],
         current_attention=attention,
         timeline_length=timeline_length,
         hidden_width=embedding.weight.shape[1],

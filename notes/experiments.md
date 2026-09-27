@@ -461,3 +461,21 @@ START/STOP cycles at frames 177–180 and 186–187 included post-onset STOP but
 no sustained response to interrupt. All three emitted zero lexical events and
 zero text. These failures outweigh the improvement in teacher-forced loss;
 step 600 is the selected experiment adapter, but **MAIN_CHECKPOINT_READY=FAIL**.
+
+## 2026-09-27 — TASTE `read_aloud_012247` one-sample overfit recipe
+
+This diagnostic replaces the obsolete DailyTalk complete-conversation overfit
+entry point. The current epoch-one TASTE adapter is **not** used as initialization:
+the script starts the pinned Qwen2.5-Omni-3B Thinker with the same BF16 rank-16
+LoRA targets and weighted next-event loss as `configs/turn_packed_main.yaml`.
+Only the single dev row with `idx=read_aloud_012247` is put in the training
+dataset. Batch size is one, the budget is 300 optimizer steps, and stochastic
+noise/interruption are disabled so memorization is measurable on fixed inputs.
+
+Run `.venv/bin/python scripts/run_taste_one_sample_overfit.py` on a 24 GB GPU.
+The output report distinguishes exact teacher-forced and cached free predictions
+on the training timeline, streaming on the training waveform, and streaming on
+the user-only waveform. These are separate gates because chunk context can
+change when the assistant-silence block is omitted. No overfit success or GPU
+result is claimed yet; this machine was used only for local config, row-selection,
+and code checks.

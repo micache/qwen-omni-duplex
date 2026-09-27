@@ -71,12 +71,11 @@ The repository is implemented through the small-scale training/checkpoint stage:
 - BF16 LoRA training with explicit NF4/BF16 QLoRA fallback configuration;
 - adapter-only checkpoints, deterministic seeding, metric logging, and resume;
 - cache, position-ID, and last-position decoding support;
-- CPU unit tests and opt-in real-checkpoint GPU integration tests.
+- one-sample TASTE overfit diagnostic with teacher-forced, cached, and streaming reports.
 
-The generation loop is not implemented. No main dataset experiment or benchmark
-has been run; Session 08 only ran a three-step synthetic smoke test. The YAML
-files in `configs/` are runnable local recipes after the dataset path and any
-separately verified speaker-label mapping are supplied.
+The full TASTE run has an epoch-one adapter under `outputs/turn-packed-main-batch8/`.
+The one-sample diagnostic below is a separate, fresh run; it does not resume
+that adapter.
 
 ## Setup
 
@@ -167,26 +166,6 @@ memory measurements are recorded in
 [`notes/compatibility.md`](notes/compatibility.md) and
 [`notes/session06_probe.json`](notes/session06_probe.json).
 
-## Tests
-
-Run the normal CPU suite with:
-
-```bash
-.venv/bin/python -m pytest -q
-```
-
-Real-checkpoint GPU tests are opt-in so normal pytest never downloads or loads
-the model. They require the pinned checkpoint to already exist in the local
-Hugging Face cache:
-
-```bash
-RUN_QWEN_GPU_TESTS=1 \
-  .venv/bin/python -m pytest -q tests/test_model_gpu.py -s
-```
-
-The GPU suite checks text-only parity with the base Thinker, one real
-two-second audio forward, a batch-of-two forward, and no-gradient peak VRAM.
-
 ## Training
 
 The primary 24 GB path is BF16 LoRA. Edit only the local dataset path and any
@@ -202,6 +181,29 @@ switches to it automatically after an out-of-memory error. Both paths save only
 PEFT adapters, processor/tokenizer files, reconstruction metadata, and Trainer
 resume state; full Qwen base weights are never written.
 
+### One-sample TASTE overfit on a 24 GB GPU
+
+From a fresh clone, set up `.venv` as above, then fetch the pinned base and only
+the TASTE dev Parquet. The sample `read_aloud_012247` is dev row 2. No MUSAN or
+TASTE training shards are needed for this diagnostic.
+
+```bash
+.venv/bin/python -c 'from huggingface_hub import snapshot_download; snapshot_download(repo_id="Qwen/Qwen2.5-Omni-3B", revision="f75b40e3da2003cdd6e1829b1f420ca70797c34e")'
+.venv/bin/python scripts/prepare_turn_packed_data.py --download --dev-only
+.venv/bin/python scripts/run_taste_one_sample_overfit.py
+```
+
+This trains from the same BF16 Thinker, rank-16 LoRA targets, 2 s/25 Hz audio
+alignment, and weighted loss as `configs/turn_packed_main.yaml`. The one-sample
+config uses batch size one, 300 optimizer steps, and disables random noise and
+interruption so every step sees the same audio and labels. It will not overwrite
+an existing output directory. Results are in
+`outputs/taste-one-sample-overfit-012247/report.json`, with separate traces for
+the training-aligned waveform and user-only audio. `TRAINING_OVERFIT_GATE`
+requires exact token IDs at every training frame under both teacher forcing
+and cached free decoding; `ALIGNED_STREAM_GATE` checks the production streamer
+on the training waveform, and `STREAMING_GATE` checks the user-only response.
+
 ## Repository structure
 
 ```text
@@ -210,7 +212,6 @@ duplex/timeline.py      event grammar, token alignment, and causal shifting
 duplex/model.py         additive full-duplex Thinker wrapper and weighted loss
 duplex/training.py      LoRA/QLoRA loading, Trainer, logging, and checkpoints
 scripts/                data inspection, preparation, and compatibility probe
-tests/                  CPU unit tests and opt-in GPU integration tests
 notes/                  design decisions, compatibility evidence, and progress
 configs/                BF16 LoRA, explicit QLoRA fallback, and smoke recipes
 ```

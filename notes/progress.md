@@ -871,3 +871,15 @@ The logged group losses are unweighted diagnostic cross-entropies; the higher
 lexical loss does not mean the weighted objective favors IDLE. No weight change
 was made because the data view and synthetic-interruption probability remain
 the values used to derive the checked-in weights.
+
+## 2026-09-27 — single TASTE sample diagnostic prepared
+
+Added `configs/taste_one_sample_overfit.yaml` and
+`scripts/run_taste_one_sample_overfit.py` for dev sample `read_aloud_012247`.
+The data path selects that row by `idx` and keeps the main model, LoRA, collator,
+and loss. The cached free report now supplies audio chunk counts for multi-chunk
+TASTE conversations. The old DailyTalk complete-conversation overfit runner and
+recipe, the Session 09 debug recipe, and the tracked `tests/` directory were
+removed as requested. GPU training remains for the rented RTX 3090; no result is
+claimed here. The separate report gates will expose whether failure occurs in
+training memorization, cached decoding, or user-only streaming.
