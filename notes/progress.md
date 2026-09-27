@@ -893,3 +893,8 @@ text and timed out. Added a static replay page, the exported public instruction
 audio and recorded frame trace, plus a short browser recording for the README.
 The replay explicitly says it is one overfit example and does not imply live
 inference, speech output, generalization, or a working user-only path.
+
+The replay was later removed from the README and repository. Its UI presentation
+obscured the actual event sequence, and the packed TASTE targets have no `IDLE`
+events between `START` and `STOP`. A replacement must show raw events honestly;
+it cannot imply simultaneous listening and speaking from this overfit example.

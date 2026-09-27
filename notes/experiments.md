@@ -488,3 +488,13 @@ audio yielded no response. The static demo under `demo/` replays the passing
 training-audio stream with the public input audio and labels the failed
 user-only case in the README. The replay is a presentation of the saved trace,
 not another model evaluation.
+
+That replay was subsequently removed. A scan of the 4,000 TASTE dev rows and
+44,000 training rows found only a handful of 15–20-second conversations; most
+are slow recitations. `read_aloud_038934` (training split) is a more natural
+15.45-second candidate: 4.41 seconds of instruction and 11.04 seconds of
+reference response. The current targets pack response tokens contiguously, so
+even this longer example cannot show `IDLE` between answer tokens without a new
+alignment experiment. The available Vast machine also changed from an RTX 3090
+to an RTX 2080 Ti, which lacks native BF16 support. No longer-sample training
+result is claimed.

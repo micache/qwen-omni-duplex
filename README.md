@@ -2,13 +2,7 @@
 
 I am exploring a small question: can a speech model keep listening while deciding, frame by frame, whether to wait, begin a response, write the next text token, or stop? This repository is my text-only experiment with the [Qwen2.5-Omni-3B Thinker](https://huggingface.co/Qwen/Qwen2.5-Omni-3B). It does not synthesize speech.
 
-The short clip below replays a **real saved model trace**. It is one sample that I deliberately overfit, not a live conversation or a claim that the model generalizes.
-
-![Recorded one-sample streaming replay](demo/replay.gif)
-
-[Watch the video with the input audio](demo/replay.mp4) · [Replay page files](demo/)
-
-The person in the audio asks for three kitchen tools. The model receives audio in fixed two-second chunks. At each 40 ms model position it predicts `IDLE`, `START`, a text token, or `STOP`; the page shows these decisions arriving in order. The replay uses the recorded inference trace, so no GPU is needed to view it. The animation follows the saved chunk and token sequence; it is not a live latency benchmark.
+The model receives audio in fixed two-second chunks. At each 40 ms model position it predicts `IDLE`, `START`, a text token, or `STOP`. I am still working on a representative recorded example; the one-sample overfit result below is a diagnostic, not a demo of a working assistant.
 
 ## Where the project stands
 
@@ -30,11 +24,7 @@ previous text/control event ──────────────> token em
 
 The dataset code turns each conversation into a 25 Hz timeline. User speech occupies the first part; a silent block of the reference response's duration follows it. Text tokens are placed after `START` in that block, then `STOP`, with `IDLE` everywhere else. The model sees the previous event when predicting the current one. Training uses a weighted next-event loss; only rank-16 LoRA weights in the Thinker text decoder are updated. The audio encoder stays frozen. The full TASTE recipe also includes random noise and synthetic interruptions, which are disabled in the one-sample memorization check.
 
-I used the [TASTE-IF-SFT-48K dataset](https://huggingface.co/datasets/Jaylin0418/TASTE-IF-SFT-48K) for the current spoken-instruction data. The interface takes visual cues from [Moshi's demo](https://moshi-chat.kyutai.org/), but this project does not use Moshi's model, audio codec, or live dialogue system.
-
-## Try the replay
-
-Open [`demo/index.html`](demo/index.html) in a browser and press **Play replay**. The page contains the sample audio and recorded event trace; it does not load model weights or contact a server. The video above records that page playing once.
+I used the [TASTE-IF-SFT-48K dataset](https://huggingface.co/datasets/Jaylin0418/TASTE-IF-SFT-48K) for the current spoken-instruction data.
 
 ## Reproduce the one-sample run
 
@@ -56,7 +46,6 @@ The result is written to `outputs/taste-one-sample-overfit-012247/report.json`. 
 - [`duplex/dataset.py`](duplex/dataset.py) and [`duplex/timeline.py`](duplex/timeline.py): chunk features, frame labels, and causal shift.
 - [`duplex/model.py`](duplex/model.py): additive fusion and weighted loss.
 - [`duplex/streaming.py`](duplex/streaming.py): chunk-by-chunk cached generation.
-- [`demo/`](demo/): the static one-sample replay and video.
 
 Next I want to make user-only streaming see the same audio context as training, then test on conversations the model has not memorized. Historical experiments and failed runs are recorded in [`notes/experiments.md`](notes/experiments.md).
 
