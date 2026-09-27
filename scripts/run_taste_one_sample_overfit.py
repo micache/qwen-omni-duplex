@@ -38,8 +38,9 @@ def main() -> None:
                 "max_grad_norm", "bf16", "gradient_checkpointing", "optimizer"):
         if config["training"][key] != main_config["training"][key]:
             raise ValueError(f"training.{key} differs from the full TASTE run.")
-    if config["data"].get("overfit_sample_id") != "read_aloud_012247":
-        raise ValueError("This diagnostic is fixed to read_aloud_012247.")
+    sample_id = config["data"].get("overfit_sample_id")
+    if not isinstance(sample_id, str) or not sample_id:
+        raise ValueError("The one-sample diagnostic needs data.overfit_sample_id.")
     if config["data"].get("interruption_probability") != 0 or config["data"]["noise"]["probability"] != 0:
         raise ValueError("The memorization diagnostic requires deterministic audio and labels.")
     output = Path(config["training"]["output_dir"])
@@ -54,7 +55,7 @@ def main() -> None:
     if len(dataset) != 1 or eval_dataset is not None:
         raise AssertionError("Expected exactly one training row and no evaluation split.")
     sample = dataset[0]
-    if sample.conversation_id != "read_aloud_012247":
+    if sample.conversation_id != sample_id:
         raise AssertionError(f"Selected wrong row: {sample.conversation_id}")
     timeline = collator._timeline(sample)
     fixed = _ListDataset([timeline])

@@ -498,3 +498,9 @@ even this longer example cannot show `IDLE` between answer tokens without a new
 alignment experiment. The available Vast machine also changed from an RTX 3090
 to an RTX 2080 Ti, which lacks native BF16 support. No longer-sample training
 result is claimed.
+
+For the unchanged-model follow-up, the selected row is `read_aloud_038934`
+from `shuffled_train_part_0008.parquet`. A separate config selects this one row
+and allows up to 500 optimizer steps; the overfit step validator was extended
+to 1,000 to permit longer deterministic examples. The actual gate still
+requires exact teacher-forced, cached-free, and training-audio streaming events.

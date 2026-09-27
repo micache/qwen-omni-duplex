@@ -291,8 +291,8 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
     full_conversations = bool(data.get("complete_conversations", False))
     if full_conversations:
         if data.get("overfit_subset"):
-            if not 100 <= training.get("max_steps", 0) <= 300:
-                raise ValueError("Complete-conversation overfit requires 100-300 optimizer steps.")
+            if not 100 <= training.get("max_steps", 0) <= 1000:
+                raise ValueError("Complete-conversation overfit requires 100-1000 optimizer steps.")
         else:
             if training.get("num_train_epochs") not in (3,):
                 raise ValueError("Complete-conversation main training requires three epochs.")

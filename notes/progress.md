@@ -898,3 +898,8 @@ The replay was later removed from the README and repository. Its UI presentation
 obscured the actual event sequence, and the packed TASTE targets have no `IDLE`
 events between `START` and `STOP`. A replacement must show raw events honestly;
 it cannot imply simultaneous listening and speaking from this overfit example.
+
+The next diagnostic keeps the identical model, timeline, LoRA targets, and
+weighted loss, but selects the 15.45-second `read_aloud_038934` training row.
+Its config runs up to 500 one-sample updates with recovery checkpoints every
+100 steps. No result is claimed until its actual generation trace is checked.
