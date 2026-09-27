@@ -6,7 +6,7 @@ The short clip below replays a **real saved model trace**. It is one sample that
 
 ![Recorded one-sample streaming replay](demo/replay.gif)
 
-[Watch the video with the input audio](demo/replay.mp4) · [Open the replay page](demo/index.html)
+[Watch the video with the input audio](demo/replay.mp4) · [Replay page files](demo/)
 
 The person in the audio asks for three kitchen tools. The model receives audio in fixed two-second chunks. At each 40 ms model position it predicts `IDLE`, `START`, a text token, or `STOP`; the page shows these decisions arriving in order. The replay uses the recorded inference trace, so no GPU is needed to view it. The animation follows the saved chunk and token sequence; it is not a live latency benchmark.
 
