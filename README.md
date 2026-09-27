@@ -1,52 +1,44 @@
 # Qwen Omni Duplex
 
-I am exploring a small question: can a speech model keep listening while deciding, frame by frame, whether to wait, begin a response, write the next text token, or stop? This repository is my text-only experiment with the [Qwen2.5-Omni-3B Thinker](https://huggingface.co/Qwen/Qwen2.5-Omni-3B). It does not synthesize speech.
+A small research project on streaming text responses to speech. I use the [Qwen2.5-Omni-3B Thinker](https://huggingface.co/Qwen/Qwen2.5-Omni-3B) to process audio in two-second chunks and predict one event every 40 ms: `IDLE`, `START`, a text token, or `STOP`. The model does not generate speech. I want to understand whether this kind of event timeline can support a full-duplex assistant without a separate turn-taking model.
 
-The model receives audio in fixed two-second chunks. At each 40 ms model position it predicts `IDLE`, `START`, a text token, or `STOP`. I am still working on a representative recorded example; the one-sample overfit result below is a diagnostic, not a demo of a working assistant.
+## One-sample run
 
-## Where the project stands
+The instruction is: “Say it slowly: describe a peaceful countryside in one sentence.”
 
-The current checkpoint can memorize one TASTE sample. After 300 updates on that sample, teacher-forced prediction, cached free decoding, and the streaming loop all reproduced its **123/123 training events** and the exact answer: “A whisk, a blender, and a spatula.” The training waveform is 2.531 seconds of user speech followed by 2.388 seconds of silence. When I give the same checkpoint only the user speech, it stays silent. That mismatch is the next problem to solve; this demo intentionally uses the waveform on which the model was trained.
+[Input audio (MP3)](demo/input.mp3) · [Video with audio (MP4)](demo/stream.mp4)
 
-This is a research prototype. It has one verified overfit example, not a usable voice assistant. The model currently outputs text, not audio, and this sample does not demonstrate an interruption or simultaneous speech.
+[![Terminal stream replay](demo/stream.gif)](demo/stream.mp4)
 
-## How it works
+I overfit this one TASTE example for 500 steps. On the training waveform, teacher forcing, cached free decoding, and chunk-by-chunk generation all match the **386 target events exactly**: 370 `IDLE`, one `START`, 14 text tokens, and one `STOP`. The generated text is “Rolling hills stretch endlessly, dotted with grazing sheep and wildflowers.” The [report](demo/report.json) and [frame trace](demo/training_audio_stream.jsonl) are here too.
 
-```text
-2 s audio chunk ──> Qwen audio encoder ──> audio feature at position t
-previous text/control event ──────────────> token embedding at position t
-                                        add both
-                                           ↓
-                                     Qwen Thinker
-                                           ↓
-                            IDLE / START / text / STOP
-```
+The video replays those saved decisions at 25 Hz so the text can be read; it is not a live-inference speed measurement. Its audio plays the 4.41-second user instruction, then the dataset's 11.04-second reference response for comparison. The model actually receives **silence** during that second part and produces **text only**. With just the user audio and no training-length silent block, this checkpoint produces no response. This is a memorization check, not evidence of generalization or simultaneous listening and speaking.
 
-The dataset code turns each conversation into a 25 Hz timeline. User speech occupies the first part; a silent block of the reference response's duration follows it. Text tokens are placed after `START` in that block, then `STOP`, with `IDLE` everywhere else. The model sees the previous event when predicting the current one. Training uses a weighted next-event loss; only rank-16 LoRA weights in the Thinker text decoder are updated. The audio encoder stays frozen. The full TASTE recipe also includes random noise and synthetic interruptions, which are disabled in the one-sample memorization check.
+## Method
 
-I used the [TASTE-IF-SFT-48K dataset](https://huggingface.co/datasets/Jaylin0418/TASTE-IF-SFT-48K) for the current spoken-instruction data.
+The dataset builder appends a silent block, as long as the reference response audio, to each spoken instruction. It puts `IDLE` on the user-audio frames, then `START`, the response text tokens, `STOP`, and more `IDLE` on the silent frames. The previous text/control event and the current audio feature are added in the Thinker's hidden space. A weighted next-event loss trains rank-16 LoRA adapters in the text decoder; the audio encoder stays frozen. The full training recipe adds noise and synthetic interruptions, but neither is used in this one-row overfit test.
 
-## Reproduce the one-sample run
+The data is [TASTE-IF-SFT-48K](https://huggingface.co/datasets/Jaylin0418/TASTE-IF-SFT-48K). This project uses only the Qwen Thinker; it does not train the Talker or an audio codec.
 
-Use Python 3.11 and a CUDA GPU with roughly 24 GB of VRAM. From the repository root:
+## Reproduce
+
+Use Python 3.11 and a CUDA GPU. From the repository root:
 
 ```bash
 python3.11 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python -c 'from huggingface_hub import snapshot_download; snapshot_download(repo_id="Qwen/Qwen2.5-Omni-3B", revision="f75b40e3da2003cdd6e1829b1f420ca70797c34e")'
-.venv/bin/python scripts/prepare_turn_packed_data.py --download --dev-only
-.venv/bin/python scripts/run_taste_one_sample_overfit.py
+.venv/bin/python -c 'from huggingface_hub import hf_hub_download; hf_hub_download(repo_id="Jaylin0418/TASTE-IF-SFT-48K", repo_type="dataset", filename="data/shuffled_train_part_0008.parquet", local_dir="data/TASTE-IF-SFT-48K")'
+.venv/bin/python scripts/prepare_taste_one_row.py
+.venv/bin/python scripts/run_taste_one_sample_overfit.py --config configs/taste_one_sample_overfit_038934.yaml
 ```
 
-The result is written to `outputs/taste-one-sample-overfit-012247/report.json`. It reports training-timeline accuracy, cached decoding, streaming on the training waveform, and streaming on user-only audio **separately**. The one-sample configuration is in [`configs/taste_one_sample_overfit.yaml`](configs/taste_one_sample_overfit.yaml). To train the larger TASTE recipe, see [`configs/turn_packed_main.yaml`](configs/turn_packed_main.yaml) and run `.venv/bin/python train.py --config configs/turn_packed_main.yaml` after downloading the full data with `.venv/bin/python scripts/prepare_turn_packed_data.py --download`.
+The run writes its adapter, separate decoding checks, and frame traces to `outputs/taste-one-sample-overfit-038934/`. To replay a saved trace in your own terminal:
 
-## Code map
+```bash
+.venv/bin/python scripts/replay_stream_trace.py --report demo/report.json --trace demo/training_audio_stream.jsonl
+```
 
-- [`duplex/turn_packed.py`](duplex/turn_packed.py): TASTE rows, silent response block, and augmentation.
-- [`duplex/dataset.py`](duplex/dataset.py) and [`duplex/timeline.py`](duplex/timeline.py): chunk features, frame labels, and causal shift.
-- [`duplex/model.py`](duplex/model.py): additive fusion and weighted loss.
-- [`duplex/streaming.py`](duplex/streaming.py): chunk-by-chunk cached generation.
+The larger training recipe is [`configs/turn_packed_main.yaml`](configs/turn_packed_main.yaml). The main implementation is in [`duplex/turn_packed.py`](duplex/turn_packed.py) (data), [`duplex/model.py`](duplex/model.py) (fusion and loss), and [`duplex/streaming.py`](duplex/streaming.py) (generation). I am still investigating why user-only audio fails after the training-aligned overfit succeeds; experiment notes are in [`notes/experiments.md`](notes/experiments.md).
 
-Next I want to make user-only streaming see the same audio context as training, then test on conversations the model has not memorized. Historical experiments and failed runs are recorded in [`notes/experiments.md`](notes/experiments.md).
-
-This is an independent student project. Qwen and TASTE remain the work of their respective authors; their licenses apply to the model and sample data. The repository code is Apache 2.0 licensed.
+Independent student project. Repository code: Apache 2.0. The Qwen model and TASTE sample retain their own licenses.

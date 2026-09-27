@@ -504,3 +504,15 @@ from `shuffled_train_part_0008.parquet`. A separate config selects this one row
 and allows up to 500 optimizer steps; the overfit step validator was extended
 to 1,000 to permit longer deterministic examples. The actual gate still
 requires exact teacher-forced, cached-free, and training-audio streaming events.
+
+The 500-step run completed on the available RTX 2080 Ti. Its final logged
+training loss was 3.065e-06 (text 1.505e-06; `IDLE` 1.382e-07; `START`
+2.445e-05; `STOP` 1.422e-05). The report records
+`training_overfit_gate=PASS`, `aligned_stream_gate=PASS`, and
+`streaming_gate=FAIL`. All 386 training-waveform events matched, including 370
+`IDLE`, one `START` at frame 110, 14 text tokens, and one `STOP` at frame 125.
+The training-waveform text exactly matched the reference countryside sentence;
+the user-only waveform returned an empty string after the silent-chunk limit.
+The terminal recording under `demo/` replays the verified event sequence at
+25 Hz with the TASTE reference speech audible for comparison, not as model
+input or synthesized output. It is not a latency measurement.

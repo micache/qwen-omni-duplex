@@ -903,3 +903,10 @@ The next diagnostic keeps the identical model, timeline, LoRA targets, and
 weighted loss, but selects the 15.45-second `read_aloud_038934` training row.
 Its config runs up to 500 one-sample updates with recovery checkpoints every
 100 steps. No result is claimed until its actual generation trace is checked.
+
+The 500-step RTX 2080 Ti run finished. Teacher-forced, cached-free, and
+training-audio streaming predictions matched all 386 labels; user-only
+streaming still returned no text. Added the verified report and trace, the
+sample MP3, and a plain terminal replay video. The replay uses 25 Hz timeline
+spacing for readability and labels the reference speech in its audio track;
+neither is presented as generated audio or measured inference latency.
