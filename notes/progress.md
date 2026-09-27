@@ -883,3 +883,13 @@ recipe, the Session 09 debug recipe, and the tracked `tests/` directory were
 removed as requested. GPU training remains for the rented RTX 3090; no result is
 claimed here. The separate report gates will expose whether failure occurs in
 training memorization, cached decoding, or user-only streaming.
+
+## 2026-09-27 — one-sample replay prepared
+
+The Vast RTX 3090 report for `read_aloud_012247` records 300 updates,
+teacher-forced and cached-free exact matches, and 123/123 exact events from the
+streamer when given the training waveform. The user-only stream produced no
+text and timed out. Added a static replay page, the exported public instruction
+audio and recorded frame trace, plus a short browser recording for the README.
+The replay explicitly says it is one overfit example and does not imply live
+inference, speech output, generalization, or a working user-only path.

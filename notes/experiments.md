@@ -479,3 +479,12 @@ the user-only waveform. These are separate gates because chunk context can
 change when the assistant-silence block is omitted. No overfit success or GPU
 result is claimed yet; this machine was used only for local config, row-selection,
 and code checks.
+
+The rented RTX 3090 run later completed all 300 steps. Its report records
+`training_overfit_gate=PASS`, `aligned_stream_gate=PASS`, and
+`streaming_gate=FAIL`: the 4.919125-second training waveform yielded the exact
+123-frame event sequence and response text, while the 2.531-second user-only
+audio yielded no response. The static demo under `demo/` replays the passing
+training-audio stream with the public input audio and labels the failed
+user-only case in the README. The replay is a presentation of the saved trace,
+not another model evaluation.

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1012">
+  <title>Duplex — one sample, frame by frame</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="../README.md" aria-label="Qwen Omni Duplex README">
+        <span class="brand-mark"><i></i><i></i><i></i></span>
+        <span>qwen omni <strong>duplex</strong></span>
+      </a>
+      <div class="top-right"><span class="dot"></span> one-sample research replay <span class="top-separator">/</span> <a href="https://github.com/micache/qwen-omni-duplex">source ↗</a></div>
+    </header>
+
+    <section class="intro">
+      <div>
+        <p class="eyebrow">STREAMING TEXT FROM SPEECH <span>·</span> RECORDED TRACE 001</p>
+        <h1>Listen in chunks.<br><em>Answer one token at a time.</em></h1>
+      </div>
+      <p class="intro-note">A replay of one overfit example. The left side is the audio the model heard; the right side shows its saved frame-by-frame decisions. No live inference is running here.</p>
+    </section>
+
+    <section class="stage" aria-label="Recorded streaming example">
+      <div class="panel input-panel">
+        <div class="panel-heading"><span class="panel-index">01</span><span>INPUT STREAM</span><span class="panel-meta">16 kHz audio</span></div>
+        <div class="input-content">
+          <div class="orb-wrap" aria-hidden="true">
+            <div class="orb-halo"></div><div class="orb"><div class="orb-core"></div></div>
+            <span class="orb-caption" id="input-state">Ready to replay</span>
+          </div>
+          <div class="input-bottom">
+            <div class="section-label"><span>DATASET AUDIO</span><span id="audio-clock">0.00 / 2.53 s</span></div>
+            <div class="waveform" id="waveform" aria-label="Audio waveform"></div>
+            <p class="transcript-label">Transcript <span>shown for the viewer, not fed to the model</span></p>
+            <p class="transcript">“Please list three kitchen tools quickly.”</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel output-panel">
+        <div class="panel-heading"><span class="panel-index">02</span><span>MODEL STREAM</span><span class="panel-meta">25 Hz audio timeline</span></div>
+        <div class="output-content">
+          <div class="stream-status"><span class="status-pulse"></span><span id="model-state">Waiting for audio</span><span id="decision-count">000 / 123</span></div>
+          <div class="answer-block">
+            <span class="answer-label">TEXT OUTPUT</span>
+            <p class="answer" id="answer"><span class="placeholder">The response appears here, token by token.</span></p>
+            <span class="cursor" id="cursor" aria-hidden="true"></span>
+          </div>
+          <div class="controls-row"><span class="event-pill" id="current-event">IDLE</span><span class="event-explainer" id="event-explainer">Listening without speaking</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sequence" aria-label="Audio chunks and generated events">
+      <div class="sequence-head"><span class="section-label">CHUNKED AUDIO → NEXT EVENT</span><span id="replay-clock">00:00 / 00:00</span></div>
+      <div class="chunks" id="chunks">
+        <div class="chunk" data-chunk="0"><span>CHUNK 01</span><strong>0–2 s</strong><small>user audio</small></div>
+        <div class="chunk" data-chunk="1"><span>CHUNK 02</span><strong>2–4 s</strong><small>speech → silence</small></div>
+        <div class="chunk" data-chunk="2"><span>CHUNK 03</span><strong>4–4.92 s</strong><small>silence</small></div>
+      </div>
+      <div class="frame-track" id="frame-track" aria-label="123 generated event positions"></div>
+      <div class="legend"><span><i class="idle-key"></i> IDLE</span><span><i class="start-key"></i> START</span><span><i class="text-key"></i> TEXT</span><span><i class="stop-key"></i> STOP</span><span class="legend-note">one block = one 40 ms model position</span></div>
+    </section>
+
+    <footer class="bottom">
+      <div class="playback"><button id="play-button" class="play-button" type="button"><span id="play-icon">▶</span><span id="play-label">Play replay</span></button><button id="restart-button" class="restart-button" type="button">↺ &nbsp; Restart</button></div>
+      <p>Sample <code>read_aloud_012247</code> · Qwen2.5-Omni-3B Thinker + LoRA · saved overfit checkpoint<br><span>This is a trace replay, not a live conversation. Only this training waveform has been verified to produce the exact answer.</span></p>
+    </footer>
+  </main>
+  <audio id="input-audio" preload="auto" src="input.wav"></audio>
+  <script src="sample.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

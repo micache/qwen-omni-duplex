@@ -1,238 +1,63 @@
 # Qwen Omni Duplex
 
-A small research repository for adapting the
-[Qwen2.5-Omni-3B](https://huggingface.co/Qwen/Qwen2.5-Omni-3B) **Thinker** to
-text-only full-duplex dialogue. The model listens to user audio in fixed
-two-second windows and predicts one next event every 40 ms: a text token,
-`IDLE`, `START`, or `STOP`.
+I am exploring a small question: can a speech model keep listening while deciding, frame by frame, whether to wait, begin a response, write the next text token, or stop? This repository is my text-only experiment with the [Qwen2.5-Omni-3B Thinker](https://huggingface.co/Qwen/Qwen2.5-Omni-3B). It does not synthesize speech.
 
-The current training recipe uses the public
-[TASTE-IF-SFT-48K](https://huggingface.co/datasets/Jaylin0418/TASTE-IF-SFT-48K)
-spoken instruction dataset and creates synthetic interruptions for overlap
-training. The older DailyTalkContiguous reader remains available for reproducing
-the earlier timestamp-aligned experiments. It is based
-on the Thinker/audio tower from Qwen2.5-Omni, but it does not train the Talker,
-generate speech, or add a separate controller.
+The short clip below replays a **real saved model trace**. It is one sample that I deliberately overfit, not a live conversation or a claim that the model generalizes.
 
-This is a compact student research reproduction. The aim is to keep the data
-alignment, causal timeline, fusion rule, and loss easy to inspect before
-running a larger training experiment.
+![Recorded one-sample streaming replay](demo/replay.gif)
 
-## Method
+[Watch the video with the input audio](demo/replay.mp4) · [Open the replay page](demo/index.html)
 
-Each example is one complete conversation, encoded in fixed two-second audio
-chunks with 25 positions per second. The user block contains the real user
-waveform and only `IDLE` targets. The assistant block contains silence with the
-same duration as the reference response waveform; its targets are packed as
-`START`, the contiguous response tokens, `STOP`, then `IDLE` for the rest of
-the block. Word timestamps are not used. The input at a position contains the
-previous causal text or control event, while the label is the current event.
+The person in the audio asks for three kitchen tools. The model receives audio in fixed two-second chunks. At each 40 ms model position it predicts `IDLE`, `START`, a text token, or `STOP`; the page shows these decisions arriving in order. The replay uses the recorded inference trace, so no GPU is needed to view it. The animation follows the saved chunk and token sequence; it is not a live latency benchmark.
+
+## Where the project stands
+
+The current checkpoint can memorize one TASTE sample. After 300 updates on that sample, teacher-forced prediction, cached free decoding, and the streaming loop all reproduced its **123/123 training events** and the exact answer: “A whisk, a blender, and a spatula.” The training waveform is 2.531 seconds of user speech followed by 2.388 seconds of silence. When I give the same checkpoint only the user speech, it stays silent. That mismatch is the next problem to solve; this demo intentionally uses the waveform on which the model was trained.
+
+This is a research prototype. It has one verified overfit example, not a usable voice assistant. The model currently outputs text, not audio, and this sample does not demonstrate an interruption or simultaneous speech.
+
+## How it works
 
 ```text
-user audio       -> Qwen audio tower -------------------+
-previous text    -> Qwen shared token embedding -> mask +--> Qwen Thinker --> next event
-previous control -> Qwen shared token embedding -> mask +
+2 s audio chunk ──> Qwen audio encoder ──> audio feature at position t
+previous text/control event ──────────────> token embedding at position t
+                                        add both
+                                           ↓
+                                     Qwen Thinker
+                                           ↓
+                            IDLE / START / text / STOP
 ```
 
-The three streams are aligned in the Thinker hidden space and added directly:
+The dataset code turns each conversation into a 25 Hz timeline. User speech occupies the first part; a silent block of the reference response's duration follows it. Text tokens are placed after `START` in that block, then `STOP`, with `IDLE` everywhere else. The model sees the previous event when predicting the current one. Training uses a weighted next-event loss; only rank-16 LoRA weights in the Thinker text decoder are updated. The audio encoder stays frozen. The full TASTE recipe also includes random noise and synthetic interruptions, which are disabled in the one-sample memorization check.
 
-```text
-fused = audio + masked_text + masked_control
-```
+I used the [TASTE-IF-SFT-48K dataset](https://huggingface.co/datasets/Jaylin0418/TASTE-IF-SFT-48K) for the current spoken-instruction data. The interface takes visual cues from [Moshi's demo](https://moshi-chat.kyutai.org/), but this project does not use Moshi's model, audio codec, or live dialogue system.
 
-There is no learned projection, fusion gate, event classifier, or new tokenizer
-token. The original Thinker text model and language-model head predict both
-lexical tokens and the three control events.
+## Try the replay
 
-Training uses direct, unshifted weighted cross-entropy because the timeline
-builder has already shifted the causal inputs:
+Open [`demo/index.html`](demo/index.html) in a browser and press **Play replay**. The page contains the sample audio and recorded event trace; it does not load model weights or contact a server. The video above records that page playing once.
 
-```text
-loss = sum(weight[target] * cross_entropy(logits, target))
-       --------------------------------------------------
-                    sum(weight[target])
-```
+## Reproduce the one-sample run
 
-Text, `IDLE`, `START`, and `STOP` have independently configurable weights.
-Batch padding is ignored. Thinker-native PAD/BOS/EOS rows represent
-`IDLE`/`START`/`STOP`, respectively.
-
-## Current status
-
-The repository is implemented through the small-scale training/checkpoint stage:
-
-- strict two-second/25 Hz causal event timelines;
-- whole-utterance text tokenization and word-to-frame alignment;
-- contiguous DailyTalk loading, validation, splitting, and collation;
-- deterministic synthetic user interruptions;
-- Qwen audio-tower feature extraction and flattened batch restoration;
-- additive audio/text/control fusion in the shared 2,048-wide hidden space;
-- weighted next-event loss with per-group losses and counts;
-- BF16 LoRA training with explicit NF4/BF16 QLoRA fallback configuration;
-- adapter-only checkpoints, deterministic seeding, metric logging, and resume;
-- cache, position-ID, and last-position decoding support;
-- one-sample TASTE overfit diagnostic with teacher-forced, cached, and streaming reports.
-
-The full TASTE run has an epoch-one adapter under `outputs/turn-packed-main-batch8/`.
-The one-sample diagnostic below is a separate, fresh run; it does not resume
-that adapter.
-
-## Setup
-
-The repository uses Python 3.11 and a local `.venv`. From the repository root:
+Use Python 3.11 and a CUDA GPU with roughly 24 GB of VRAM. From the repository root:
 
 ```bash
 python3.11 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements.txt
-```
-
-The pinned environment uses PyTorch 2.10.0 with CUDA 12.6 and Transformers
-5.17.0. FlashAttention is optional and was not used for the accepted
-compatibility path; SDPA is the tested attention implementation.
-
-## Dataset preparation
-
-The selected TASTE default layout is about 12 GB and contains 44,000 training
-and 4,000 development conversations. MUSAN's noise-only config adds about
-696 MB. Download and validate only those subsets with:
-
-```bash
-.venv/bin/python scripts/prepare_turn_packed_data.py --download
-```
-
-The runnable recipe is `configs/turn_packed_main.yaml`. Its `noise.probability`
-controls on-the-fly MUSAN mixing; `min_snr_db` and `max_snr_db` control the
-uniform SNR range. Synthetic interruption is also sampled on the fly: donor
-user speech is overlaid during an assistant-silence block and the target emits
-`STOP` at the overlap onset.
-
-The full training loss uses `text=1.0`, `IDLE=0.1`, `START=4.0`, and
-`STOP=4.0`. These weights come from the checked-in full-train histogram rather
-than a batch-local estimate; rerun `scripts/analyze_turn_packed_weights.py` if
-the data view or interruption probability changes.
-
-### Legacy DailyTalk preparation
-
-The expected dataset layout contains `dailytalk.jsonl` and `data_stereo/` under
-one directory. To validate an existing local copy and create a deterministic
-conversation-level split index:
-
-```bash
-.venv/bin/python scripts/prepare_dailytalk.py \
-  --dataset-root /path/to/DailyTalkContiguous \
-  --output data/dailytalk_splits.jsonl
-```
-
-The dataset is not downloaded automatically. To explicitly download the public
-Hugging Face snapshot first, add `--download`:
-
-```bash
-.venv/bin/python scripts/prepare_dailytalk.py \
-  --dataset-root data/DailyTalkContiguous \
-  --output data/dailytalk_splits.jsonl \
-  --download
-```
-
-Stereo channel 0 is treated as assistant/reference audio and channel 1 as the
-user/model input. Only the user waveform is passed to the Thinker. The public
-sidecar format does not establish every user word label, so cross-speaker
-boundary construction requires an explicitly verified speaker mapping.
-
-Inspect one local conversation and its proposed two-second windows with:
-
-```bash
-.venv/bin/python scripts/inspect_sample.py \
-  /path/to/DailyTalkContiguous/dailytalk.jsonl \
-  --index 0
-```
-
-## Qwen compatibility probe
-
-The repository pins checkpoint revision
-`f75b40e3da2003cdd6e1829b1f420ca70797c34e`. The direct Thinker loading path,
-real two-second audio encoding, batch restoration, text prefill, and cached
-one-step decoding were checked with:
-
-```bash
-.venv/bin/python scripts/probe_qwen.py \
-  --revision f75b40e3da2003cdd6e1829b1f420ca70797c34e
-```
-
-This probe loads the real checkpoint and requires CUDA. It passed on an RTX
-2060 SUPER using WSL managed-memory paging, but a GPU with at least 24 GB VRAM
-is preferred for practical experiments. Exact shapes, package versions, and
-memory measurements are recorded in
-[`notes/compatibility.md`](notes/compatibility.md) and
-[`notes/session06_probe.json`](notes/session06_probe.json).
-
-## Training
-
-The primary 24 GB path is BF16 LoRA. Edit only the local dataset path and any
-verified user speaker label in `configs/train_lora.yaml`, then run:
-
-```bash
-.venv/bin/python train.py --config configs/train_lora.yaml
-```
-
-The explicit 16 GB fallback is `configs/train_qlora_16gb.yaml`, which selects
-4-bit NF4 loading with BF16 compute and labels outputs as QLoRA. Training never
-switches to it automatically after an out-of-memory error. Both paths save only
-PEFT adapters, processor/tokenizer files, reconstruction metadata, and Trainer
-resume state; full Qwen base weights are never written.
-
-### One-sample TASTE overfit on a 24 GB GPU
-
-From a fresh clone, set up `.venv` as above, then fetch the pinned base and only
-the TASTE dev Parquet. The sample `read_aloud_012247` is dev row 2. No MUSAN or
-TASTE training shards are needed for this diagnostic.
-
-```bash
 .venv/bin/python -c 'from huggingface_hub import snapshot_download; snapshot_download(repo_id="Qwen/Qwen2.5-Omni-3B", revision="f75b40e3da2003cdd6e1829b1f420ca70797c34e")'
 .venv/bin/python scripts/prepare_turn_packed_data.py --download --dev-only
 .venv/bin/python scripts/run_taste_one_sample_overfit.py
 ```
 
-This trains from the same BF16 Thinker, rank-16 LoRA targets, 2 s/25 Hz audio
-alignment, and weighted loss as `configs/turn_packed_main.yaml`. The one-sample
-config uses batch size one, 300 optimizer steps, and disables random noise and
-interruption so every step sees the same audio and labels. It will not overwrite
-an existing output directory. Results are in
-`outputs/taste-one-sample-overfit-012247/report.json`, with separate traces for
-the training-aligned waveform and user-only audio. `TRAINING_OVERFIT_GATE`
-requires exact token IDs at every training frame under both teacher forcing
-and cached free decoding; `ALIGNED_STREAM_GATE` checks the production streamer
-on the training waveform, and `STREAMING_GATE` checks the user-only response.
+The result is written to `outputs/taste-one-sample-overfit-012247/report.json`. It reports training-timeline accuracy, cached decoding, streaming on the training waveform, and streaming on user-only audio **separately**. The one-sample configuration is in [`configs/taste_one_sample_overfit.yaml`](configs/taste_one_sample_overfit.yaml). To train the larger TASTE recipe, see [`configs/turn_packed_main.yaml`](configs/turn_packed_main.yaml) and run `.venv/bin/python train.py --config configs/turn_packed_main.yaml` after downloading the full data with `.venv/bin/python scripts/prepare_turn_packed_data.py --download`.
 
-## Repository structure
+## Code map
 
-```text
-duplex/dataset.py       DailyTalk reader, windows, augmentation, and collator
-duplex/timeline.py      event grammar, token alignment, and causal shifting
-duplex/model.py         additive full-duplex Thinker wrapper and weighted loss
-duplex/training.py      LoRA/QLoRA loading, Trainer, logging, and checkpoints
-scripts/                data inspection, preparation, and compatibility probe
-notes/                  design decisions, compatibility evidence, and progress
-configs/                BF16 LoRA, explicit QLoRA fallback, and smoke recipes
-```
+- [`duplex/turn_packed.py`](duplex/turn_packed.py): TASTE rows, silent response block, and augmentation.
+- [`duplex/dataset.py`](duplex/dataset.py) and [`duplex/timeline.py`](duplex/timeline.py): chunk features, frame labels, and causal shift.
+- [`duplex/model.py`](duplex/model.py): additive fusion and weighted loss.
+- [`duplex/streaming.py`](duplex/streaming.py): chunk-by-chunk cached generation.
+- [`demo/`](demo/): the static one-sample replay and video.
 
-## References
+Next I want to make user-only streaming see the same audio context as training, then test on conversations the model has not memorized. Historical experiments and failed runs are recorded in [`notes/experiments.md`](notes/experiments.md).
 
-- [Qwen2.5-Omni Technical Report](https://arxiv.org/abs/2503.20215)
-- [Official Qwen2.5-Omni repository](https://github.com/QwenLM/Qwen2.5-Omni)
-- [Qwen/Qwen2.5-Omni-3B](https://huggingface.co/Qwen/Qwen2.5-Omni-3B)
-- [kyutai/DailyTalkContiguous](https://huggingface.co/datasets/kyutai/DailyTalkContiguous)
-- [Full-Duplex-Bench](https://full-duplex-bench.github.io/)
-
-Any future Full-Duplex-Bench result from this repository must be labeled a
-**text-timeline adaptation**, not an official speech-output score.
-
-## License and scope
-
-The repository is released under the Apache 2.0 license. It is an independent
-research project and is not affiliated with or endorsed by Qwen, Alibaba,
-Kyutai, DailyTalk, or Full-Duplex-Bench. Upstream models and datasets remain
-subject to their own licenses and terms.
-
-See [`notes/design.md`](notes/design.md) for the detailed timeline decisions and
-[`notes/progress.md`](notes/progress.md) for the session-by-session record.
+This is an independent student project. Qwen and TASTE remain the work of their respective authors; their licenses apply to the model and sample data. The repository code is Apache 2.0 licensed.
