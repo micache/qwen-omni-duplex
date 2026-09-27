@@ -1,4 +1,4 @@
-"""Run explicit Qwen2.5-Omni Thinker full-duplex streaming inference."""
+"""Stream text events from audio with a Qwen2.5-Omni Thinker adapter."""
 
 import argparse
 import json
@@ -48,7 +48,7 @@ def _context_token_ids(tokenizer: object, system: str, text_context: str) -> lis
     return list(tokenizer.encode(context, add_special_tokens=True)) if context else []
 
 
-def _load_session10_model(
+def _load_model(
     config_path: Path,
     *,
     adapter_path: Path | None,
@@ -63,8 +63,8 @@ def _load_session10_model(
         selected_adapter = adapter_path or Path(config["training"]["output_dir"]) / "final"
         if not selected_adapter.is_dir():
             raise FileNotFoundError(
-                f"Session 10 adapter directory does not exist: {selected_adapter}. "
-                "Pass --base-only only for an explicit unadapted checkpoint smoke."
+                f"Adapter directory does not exist: {selected_adapter}. "
+                "Use --base-only to run the unadapted model."
             )
         _load_adapter_weights(model, selected_adapter)
     model.eval()
@@ -92,14 +92,14 @@ def main() -> None:
     args = parser.parse_args()
 
     if not torch.cuda.is_available():
-        raise SystemExit("Session 10 real-checkpoint generation requires an available CUDA GPU.")
+        raise SystemExit("Generation requires an available CUDA GPU.")
     waveform, sample_rate = sf.read(args.audio, dtype="float32", always_2d=False)
     if waveform.ndim != 1:
         raise SystemExit(f"Input audio must be mono, got shape {waveform.shape}.")
     if sample_rate != 16_000:
         raise SystemExit(f"Input audio must be 16 kHz, got {sample_rate} Hz.")
 
-    model, processor = _load_session10_model(
+    model, processor = _load_model(
         args.config,
         adapter_path=args.adapter,
         allow_download=args.allow_download,

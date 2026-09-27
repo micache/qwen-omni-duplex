@@ -139,10 +139,7 @@ class QwenDuplexThinker(nn.Module):
             raise TypeError("loss_weights must be NextEventLossWeights or a mapping.")
 
         self._validate_thinker_boundary()
-        # The accepted Transformers build exposes Qwen's vocabulary head as a
-        # position-wise Linear, so applying it after slicing the sequence is
-        # exactly equivalent to slicing full logits and avoids a large prefill
-        # allocation.  Refuse the optimization if that API boundary changes.
+        # A linear vocabulary head can project just the final position.
         self.supports_last_position_only = isinstance(self.base_thinker.lm_head, nn.Linear)
 
     @property

@@ -1,4 +1,4 @@
-"""Compact Session 08 LoRA/QLoRA training support."""
+"""Configuration, model loading, and training for the duplex Thinker."""
 
 from __future__ import annotations
 
@@ -120,7 +120,7 @@ def _required(mapping: Mapping[str, Any], name: str, path: str) -> Any:
 
 
 def load_training_config(path: str | Path) -> dict[str, Any]:
-    """Read and validate the single Session 08 YAML configuration."""
+    """Read and validate a training YAML configuration."""
 
     path = Path(path)
     with path.open(encoding="utf-8") as handle:
@@ -137,14 +137,14 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
     lora = config["lora"]
     logging = config["logging"]
     if model.get("name") != MODEL_ID or model.get("component") != MODEL_COMPONENT:
-        raise ValueError("Session 08 supports only Qwen/Qwen2.5-Omni-3B Thinker.")
+        raise ValueError("Only Qwen/Qwen2.5-Omni-3B Thinker is supported.")
     revision = model.get("revision")
     if revision != PINNED_REVISION:
         raise ValueError(f"model.revision must be the pinned commit {PINNED_REVISION}.")
     if model.get("local_files_only") is not True:
-        raise ValueError("Session 08 model loading must remain local_files_only.")
+        raise ValueError("model.local_files_only must be true for training.")
     if timeline.get("chunk_seconds") != 2.0 or timeline.get("frame_rate_hz") != 25:
-        raise ValueError("Session 08 requires fixed 2 s chunks at 25 Hz.")
+        raise ValueError("The timeline requires fixed 2 s chunks at 25 Hz.")
     if timeline.get("control_events") != ["IDLE", "START", "STOP"]:
         raise ValueError("timeline.control_events must be [IDLE, START, STOP].")
     if timeline.get("control_token_source", "talker") not in {
@@ -158,7 +158,7 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
         "output": OUTPUT,
     }
     if any(task.get(key) != value for key, value in expected_task.items()):
-        raise ValueError(f"task must retain the Session 08 scope: {expected_task}.")
+        raise ValueError(f"task must match {expected_task}.")
     if data.get("dataset") not in {DATASET_VIEW, TURN_PACKED_DATASET_VIEW}:
         raise ValueError(
             f"Training data must be {DATASET_VIEW} or {TURN_PACKED_DATASET_VIEW}."
@@ -268,13 +268,13 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
     if (method == "qlora") != (load_in_4bit is True):
         raise ValueError("QLoRA requires explicit model.load_in_4bit: true; LoRA forbids it.")
     if lora.get("rank") != 16:
-        raise ValueError("Session 08 starts at LoRA rank 16.")
+        raise ValueError("lora.rank must be 16.")
     if lora.get("target_projections") != list(PROJECTION_SUFFIXES):
         raise ValueError(
             "lora.target_projections must contain only q/k/v/o and gate/up/down projections."
         )
     if training.get("bf16") is not True:
-        raise ValueError("Session 08 training requires BF16 (including QLoRA compute).")
+        raise ValueError("BF16 is required for LoRA and QLoRA training.")
     if training.get("auto_find_batch_size", False):
         raise ValueError("Automatic OOM fallback is forbidden; select the QLoRA config explicitly.")
     for name in (
@@ -308,7 +308,7 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
             "training.batch_size and gradient_accumulation_steps must be positive."
         )
     if selected_windows is not None and not 100 <= training["max_steps"] <= 300:
-        raise ValueError("The Session 09 overfit budget must be 100-300 optimizer steps.")
+        raise ValueError("Selected-window runs require 100-300 optimizer steps.")
     backends = logging.get("backends", [])
     if not isinstance(backends, list) or not backends or not set(backends) <= {
         "jsonl",
@@ -410,8 +410,7 @@ def assert_only_allowed_lora_trainable(
 
 
 def _remove_vision_tower(thinker: nn.Module) -> None:
-    # The Session 06 direct Thinker route established that vision is unused and
-    # safe to prune after it has been explicitly frozen.
+    # Vision is unused here; drop its frozen weights to save memory.
     if hasattr(thinker, "visual"):
         del thinker.visual
         gc.collect()
@@ -422,7 +421,7 @@ def build_training_model(config: Mapping[str, Any]) -> tuple[QwenDuplexThinker, 
     """Load the pinned direct Thinker and inject adapters only into discovered text layers."""
 
     if not torch.cuda.is_available():
-        raise RuntimeError("Session 08 BF16 LoRA/QLoRA training requires an available CUDA GPU.")
+        raise RuntimeError("BF16 LoRA/QLoRA training requires an available CUDA GPU.")
     if not torch.cuda.is_bf16_supported():
         raise RuntimeError("The selected CUDA GPU does not report BF16 support.")
 

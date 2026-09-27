@@ -84,7 +84,7 @@ def main() -> None:
     stream = streamer.run(
         sample.user_waveform,
         sample_id=sample.conversation_id,
-        context_token_ids=(),  # Matches the main training collator.
+        context_token_ids=(),
         sample_rate_hz=sample.sample_rate_hz,
     )
     write_trace_jsonl(output / "user_only_stream.jsonl", stream.trace)

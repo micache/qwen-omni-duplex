@@ -1,4 +1,4 @@
-"""Train the Session 08 Qwen2.5-Omni Thinker LoRA/QLoRA adapter."""
+"""Train a Qwen2.5-Omni Thinker adapter from a YAML configuration."""
 
 import argparse
 from pathlib import Path

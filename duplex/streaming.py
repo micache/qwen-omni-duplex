@@ -212,7 +212,7 @@ def grammar_mask_logits(
     state: ResponseState,
     model: QwenDuplexThinker,
 ) -> tuple[torch.Tensor, int, bool]:
-    """Apply the Session 02 event grammar and retain the raw argmax diagnosis."""
+    """Apply the event grammar and retain the raw argmax for diagnosis."""
 
     if logits.ndim != 1:
         raise ValueError("Event logits must be a one-dimensional vocabulary vector.")

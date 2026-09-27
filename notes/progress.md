@@ -1,5 +1,14 @@
 # Progress
 
+## 2026-09-28 — repository cleanup
+
+Stopped tracking the old `outputs/turn-packed-main-batch8` run directory. Its
+checkpoint, metrics, and audio remain on the original machine under the ignored
+`outputs/` path, but a fresh clone no longer downloads them. The training
+config still writes to that path. Removed the LFS rules that only applied to
+those files, made the one-row extraction output follow its sample ID by
+default, and replaced stale session-number wording in active entry points.
+
 ## 2026-09-16 — turn-packed spoken-instruction view
 
 Replaced timestamp-spread response targets in the current recipe with an
