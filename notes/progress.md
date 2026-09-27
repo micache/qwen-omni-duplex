@@ -913,6 +913,10 @@ neither is presented as generated audio or measured inference latency.
 
 Selected a second TASTE training example, `read_aloud_016395`, to complement
 the short countryside response. Its 30-word written answer and 18.51-second
-audio timeline should make the text-token stream more visible. Added a separate
-one-row config and line wrapping to the terminal replay; GPU generation must
-still be verified before any second demo is published.
+audio timeline makes the text-token stream more visible. Added a separate
+one-row config and line wrapping to the terminal replay. The 500-step GPU run
+matched all 463 training-waveform events, including 69 text tokens, in both
+cached and chunked streaming decoding. User-only streaming produced no text.
+Added the report, verified frame trace, input MP3, and plain terminal video/GIF
+as a second README example. The README now presents the clips as training-
+example replays, with detailed diagnostics kept here and in the reports.

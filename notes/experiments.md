@@ -521,6 +521,14 @@ For a second, visibly longer console example, the selected training row is
 `read_aloud_016395` in `shuffled_train_part_0008.parquet`. Its 2.28-second
 instruction asks for a quick count from one to thirty; the 276-character
 reference text is spoken over 16.24 seconds (18.51 seconds total). The same
-Thinker/LoRA/timeline/loss recipe will run on a one-row dataset under the
-separate `configs/taste_one_sample_overfit_016395.yaml` configuration. No
-generation result is claimed until the report gates and trace are checked.
+Thinker/LoRA/timeline/loss recipe ran for 500 updates on the one-row dataset
+under `configs/taste_one_sample_overfit_016395.yaml`. The final teacher-forced
+loss was 5.599e-06 (text 3.450e-06; `IDLE` 3.552e-07; `START` 5.794e-05;
+`STOP` 4.172e-05). Teacher-forced, cached-free, and training-waveform
+streaming predictions matched all 463 frames: 392 `IDLE`, one `START`, 69 text
+tokens, and one `STOP`. Thus `training_overfit_gate=PASS` and
+`aligned_stream_gate=PASS`. User-only streaming returned empty text, so
+`streaming_gate=FAIL`. The saved 25 Hz trace and video under `demo/` replay the
+training-waveform path, with the dataset reference speech audible only for
+comparison. They do not demonstrate user-only response generation or live
+inference speed.
