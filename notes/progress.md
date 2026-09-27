@@ -910,3 +910,9 @@ streaming still returned no text. Added the verified report and trace, the
 sample MP3, and a plain terminal replay video. The replay uses 25 Hz timeline
 spacing for readability and labels the reference speech in its audio track;
 neither is presented as generated audio or measured inference latency.
+
+Selected a second TASTE training example, `read_aloud_016395`, to complement
+the short countryside response. Its 30-word written answer and 18.51-second
+audio timeline should make the text-token stream more visible. Added a separate
+one-row config and line wrapping to the terminal replay; GPU generation must
+still be verified before any second demo is published.

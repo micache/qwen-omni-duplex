@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import textwrap
 import time
 from collections import Counter
 from pathlib import Path
@@ -58,8 +59,7 @@ def screen_lines(report: dict, rows: list[dict], frame: int | None) -> list[str]
         f"recent: {recent}",
         "",
         "text:",
-        answer,
-    ]
+    ] + (textwrap.wrap(answer, width=72, break_long_words=False) or [""])
 
 
 def main() -> None:

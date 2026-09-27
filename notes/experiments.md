@@ -516,3 +516,11 @@ the user-only waveform returned an empty string after the silent-chunk limit.
 The terminal recording under `demo/` replays the verified event sequence at
 25 Hz with the TASTE reference speech audible for comparison, not as model
 input or synthesized output. It is not a latency measurement.
+
+For a second, visibly longer console example, the selected training row is
+`read_aloud_016395` in `shuffled_train_part_0008.parquet`. Its 2.28-second
+instruction asks for a quick count from one to thirty; the 276-character
+reference text is spoken over 16.24 seconds (18.51 seconds total). The same
+Thinker/LoRA/timeline/loss recipe will run on a one-row dataset under the
+separate `configs/taste_one_sample_overfit_016395.yaml` configuration. No
+generation result is claimed until the report gates and trace are checked.
