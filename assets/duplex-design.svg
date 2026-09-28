@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Audio in, text out</title>
+  <desc id="desc">A TASTE row supplies user speech, answer audio duration, and answer text. Training audio is user speech followed by silence; the 25 Hz event targets are IDLE, START, text tokens, STOP, then IDLE. At each step, Qwen audio features and the previous event embedding are added and passed to the Qwen2.5-Omni-3B Thinker. It predicts a text or control event, which feeds back at the next step.</desc>
+  <defs>
+    <style>
+      .writing { font-family: 'Virgil 3 YOFF', 'Virgil', 'Patrick Hand', cursive; fill: #202020; }
+      .title { font-size: 62px; }
+      .heading { font-size: 37px; }
+      .label { font-size: 26px; }
+      .note { font-size: 23px; }
+      .small { font-size: 20px; }
+      .outline { stroke: #252525; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+      .arrow { fill: none; stroke: #282828; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+      .soft { fill: none; stroke: #696969; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+    <marker id="tip" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M 1 1 L 10 6 L 1 11" fill="none" stroke="#282828" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="soft-tip" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M 1 1 L 9 5.5 L 1 10" fill="none" stroke="#696969" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="900" fill="#fffefd"/>
+  <text x="54" y="78" class="writing title">audio in, text out</text>
+
+  <text x="64" y="199" class="writing heading">from a spoken prompt and answer...</text>
+  <text x="75" y="259" class="writing note">raw row</text>
+  <path d="M 237 216 Q 232 217 234 227 L 234 263 Q 236 269 244 269 L 519 269 Q 526 268 527 260 L 527 225 Q 525 218 516 217 Z" fill="#b9def5" class="outline"/>
+  <text x="379" y="253" text-anchor="middle" class="writing label">user speech</text>
+  <path d="M 551 219 Q 547 220 548 227 L 548 265 Q 551 272 560 271 L 866 270 Q 874 267 874 258 L 872 226 Q 868 218 860 219 Z" fill="#f2cdd2" class="outline"/>
+  <text x="711" y="254" text-anchor="middle" class="writing label">answer audio</text>
+  <path d="M 912 216 Q 906 218 908 227 L 909 264 Q 912 270 919 270 L 1170 269 Q 1178 267 1178 258 L 1177 225 Q 1172 216 1163 217 Z" fill="#fff0b9" class="outline"/>
+  <text x="1042" y="254" text-anchor="middle" class="writing label">answer text</text>
+
+  <path d="M 380 274 Q 383 298 379 321" class="soft" marker-end="url(#soft-tip)"/>
+  <path d="M 710 277 Q 706 298 705 323" class="soft" marker-end="url(#soft-tip)"/>
+  <text x="75" y="367" class="writing note">Thinker hears</text>
+  <path d="M 272 327 Q 266 330 270 337 L 269 382 Q 272 388 282 388 L 519 387 Q 526 386 528 378 L 527 335 Q 526 328 518 327 Z" fill="#b9def5" class="outline"/>
+  <text x="399" y="367" text-anchor="middle" class="writing label">user speech</text>
+  <path d="M 555 329 Q 551 330 552 338 L 552 383 Q 555 390 565 389 L 863 387 Q 871 386 872 377 L 871 335 Q 869 328 860 329 Z" fill="#f4f3f0" class="outline"/>
+  <text x="712" y="368" text-anchor="middle" class="writing label">silence</text>
+  <path d="M 903 345 Q 967 302 1037 327" class="soft" marker-end="url(#soft-tip)"/>
+  <text x="1062" y="335" class="writing note">same duration;</text>
+  <text x="1062" y="367" class="writing note">not answer speech</text>
+
+  <text x="75" y="485" class="writing note">target events</text>
+  <path d="M 275 447 Q 269 448 270 457 L 270 498 Q 272 506 281 506 L 426 505 Q 433 503 433 495 L 431 454 Q 429 447 422 447 Z" fill="#d7ecc6" class="outline"/>
+  <text x="352" y="483" text-anchor="middle" class="writing label">IDLE ...</text>
+  <path d="M 449 449 Q 446 450 446 459 L 447 497 Q 449 505 456 505 L 559 504 Q 567 503 568 495 L 568 457 Q 565 449 557 448 Z" fill="#d7ecc6" class="outline"/>
+  <text x="507" y="483" text-anchor="middle" class="writing label">START</text>
+  <path d="M 583 444 Q 576 446 578 455 L 579 495 Q 580 502 590 502 L 691 503 Q 701 502 700 492 L 698 451 Q 696 444 686 444 Z" fill="#fff0b9" class="outline"/>
+  <text x="639" y="479" text-anchor="middle" class="writing label">text₁</text>
+  <path d="M 718 448 Q 712 450 713 458 L 714 501 Q 716 508 723 507 L 825 505 Q 833 503 833 496 L 832 456 Q 830 448 822 448 Z" fill="#fff0b9" class="outline"/>
+  <text x="772" y="484" text-anchor="middle" class="writing label">text₂</text>
+  <text x="851" y="487" class="writing heading">...</text>
+  <path d="M 925 446 Q 920 447 921 456 L 922 501 Q 924 508 933 507 L 1032 505 Q 1040 504 1040 494 L 1038 453 Q 1036 445 1027 445 Z" fill="#d7ecc6" class="outline"/>
+  <text x="981" y="482" text-anchor="middle" class="writing label">STOP</text>
+  <path d="M 1056 448 Q 1052 449 1053 458 L 1054 500 Q 1056 507 1065 507 L 1204 505 Q 1212 504 1212 496 L 1210 455 Q 1208 447 1199 447 Z" fill="#d7ecc6" class="outline"/>
+  <text x="1132" y="483" text-anchor="middle" class="writing label">IDLE ...</text>
+  <path d="M 1036 277 Q 1040 397 773 442" class="soft" stroke-dasharray="7 9" marker-end="url(#soft-tip)"/>
+  <text x="1229" y="466" class="writing note">25 Hz</text>
+  <text x="1228" y="497" class="writing small">one event / 40 ms</text>
+
+  <path d="M 79 531 Q 609 529 1369 533" class="soft" stroke-dasharray="2 12"/>
+  <text x="64" y="586" class="writing heading">... then predict the next event</text>
+  <text x="100" y="637" class="writing note">2 s chunk</text>
+  <text x="104" y="667" class="writing small">50 frames</text>
+  <path d="M 229 645 Q 261 643 290 645" class="arrow" marker-end="url(#tip)"/>
+  <path d="M 312 606 Q 304 608 305 617 L 305 682 Q 307 689 316 689 L 578 687 Q 588 687 588 676 L 585 614 Q 583 605 575 606 Z" fill="#cce7f5" class="outline"/>
+  <text x="446" y="644" text-anchor="middle" class="writing label">Qwen audio encoder</text>
+  <text x="444" y="674" text-anchor="middle" class="writing small">frozen</text>
+  <path d="M 597 647 Q 629 648 660 648" class="arrow" marker-end="url(#tip)"/>
+  <text x="688" y="653" class="writing label">audio(t)</text>
+
+  <text x="96" y="761" class="writing note">last event</text>
+  <text x="111" y="790" class="writing small">text / control</text>
+  <path d="M 229 771 Q 260 767 290 768" class="arrow" marker-end="url(#tip)"/>
+  <path d="M 311 733 Q 305 733 305 742 L 305 802 Q 307 810 317 810 L 578 807 Q 587 806 587 798 L 585 740 Q 584 732 575 732 Z" fill="#e5f1dc" class="outline"/>
+  <text x="447" y="777" text-anchor="middle" class="writing label">event embedding</text>
+  <path d="M 597 770 Q 625 767 657 769" class="arrow" marker-end="url(#tip)"/>
+  <text x="688" y="777" class="writing label">event(t−1)</text>
+
+  <path d="M 800 648 Q 865 646 870 701" class="arrow" marker-end="url(#tip)"/>
+  <path d="M 818 764 Q 866 764 871 736" class="arrow" marker-end="url(#tip)"/>
+  <path d="M 850 708 Q 851 690 868 689 Q 889 690 892 711 Q 891 733 870 734 Q 850 733 850 708 Z" fill="#f5d4d4" class="outline"/>
+  <text x="871" y="725" text-anchor="middle" class="writing heading">+</text>
+  <path d="M 899 713 Q 935 711 962 713" class="arrow" marker-end="url(#tip)"/>
+  <path d="M 986 652 Q 978 656 980 669 L 979 752 Q 981 763 994 763 L 1235 762 Q 1247 759 1246 748 L 1243 665 Q 1242 653 1231 651 Z" fill="#fff0b9" class="outline"/>
+  <text x="1113" y="693" text-anchor="middle" class="writing label">Qwen2.5-Omni-3B</text>
+  <text x="1113" y="725" text-anchor="middle" class="writing label">Thinker + LoRA</text>
+  <path d="M 1254 709 Q 1285 706 1315 707" class="arrow" marker-end="url(#tip)"/>
+  <path d="M 1339 665 Q 1332 667 1333 678 L 1334 748 Q 1336 758 1347 757 L 1493 756 Q 1503 753 1503 744 L 1501 676 Q 1499 665 1489 665 Z" fill="#d7ecc6" class="outline"/>
+  <text x="1418" y="697" text-anchor="middle" class="writing label">next event</text>
+  <text x="1418" y="722" text-anchor="middle" class="writing small">IDLE / START</text>
+  <text x="1418" y="748" text-anchor="middle" class="writing small">text / STOP</text>
+
+  <path d="M 1417 765 Q 1418 842 1184 842 L 330 842 Q 156 841 149 800" class="arrow" stroke-dasharray="8 11" marker-end="url(#tip)"/>
+  <text x="604" y="832" class="writing small">streaming: feed it back, keep the cache</text>
+  <text x="1031" y="811" class="writing note">weighted next-event loss</text>
+  <text x="1280" y="871" class="writing note">text only; no Talker</text>
+</svg>

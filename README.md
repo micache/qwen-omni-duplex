@@ -2,6 +2,10 @@
 
 I am exploring whether a speech model can decide *when* to write as well as *what* to write. This project uses the [Qwen2.5-Omni-3B Thinker](https://huggingface.co/Qwen/Qwen2.5-Omni-3B) to read incoming audio and emit a 25 Hz sequence of `IDLE`, `START`, text tokens, and `STOP`. It generates text, not speech. The longer-term question is whether this event stream can support a full-duplex assistant without a separate turn-taking model.
 
+![A sketch of the training timeline and next-event model](assets/duplex-design.png)
+
+The shared-clock layout is inspired by [Moshi's joint-sequence figure](https://arxiv.org/pdf/2410.00037), but this implementation keeps only the incoming-audio and outgoing-text/control streams. [Editable sketch](assets/duplex-design.svg).
+
 ## Examples
 
 The clips below replay saved frame-by-frame model decisions. They are **training-example traces**, paced at 25 Hz for viewing—not live inference or a latency benchmark. In each video, the spoken prompt is followed by the dataset's reference speech so you can hear the answer; the model receives silence during that response interval and produces text only.
