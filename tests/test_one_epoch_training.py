@@ -4,9 +4,23 @@ import torch.nn.functional as F
 import yaml
 
 from duplex.batching import FrameBudgetBatchSampler
+from duplex.contract import prompt_token_ids
 from duplex.model import NextEventLossWeights, QwenDuplexThinker
 from duplex.timeline import ControlTokenIds
 from duplex.training import load_training_config
+from generate import _context_token_ids
+
+
+def test_empty_inference_context_does_not_add_untrained_chat_tokens():
+    class Tokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            assert messages == [{"role": "system", "content": "Explicit prefix"}]
+            return [151644, 123, 151645]
+
+    tokenizer = Tokenizer()
+    assert prompt_token_ids(tokenizer, "") == []
+    assert _context_token_ids(tokenizer, "", "") == []
+    assert _context_token_ids(tokenizer, "Explicit prefix", "") == [151644, 123, 151645]
 
 
 def test_frame_budget_keeps_all_samples_and_bounds_padding():

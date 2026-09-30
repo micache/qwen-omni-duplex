@@ -10,7 +10,7 @@ import soundfile as sf
 import torch
 
 from duplex.streaming import QwenDuplexStreamer, write_trace_jsonl
-from duplex.contract import DEFAULT_SYSTEM_PROMPT, prompt_token_ids
+from duplex.contract import prompt_token_ids
 from duplex.training import (
     _load_adapter_weights,
     build_training_model,
@@ -80,7 +80,8 @@ def main() -> None:
     parser.add_argument("--sample-id")
     parser.add_argument(
         "--system",
-        default=DEFAULT_SYSTEM_PROMPT,
+        default="",
+        help="Optional system prefix; omit to match the empty context used in training.",
     )
     parser.add_argument("--text-context", default="")
     parser.add_argument("--max-silent-chunks", type=int, default=4)

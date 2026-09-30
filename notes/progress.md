@@ -1,5 +1,29 @@
 # Progress
 
+## 2026-09-30 — diagnosis of one-epoch text errors and all-IDLE inference
+
+Compared the base model, step 1,500, final adapter, adapter-strength ablations
+and two matched 200-update pilots (learning rates 2e-4/5e-5). Early pilots
+preserve all six tested native answers but do not correctly answer the six
+streamed dev requests. Later duplex teacher-forced text metrics improve while
+native chat is suppressed; lowering the final adapter strength restores much
+of native chat but damages duplex performance. The data has only 347,793
+unaugmented response tokens, with median response length seven.
+
+Found and fixed a concrete inference mismatch: training has empty context,
+whereas CLI/model generation inserted a system prefix. That old prefix caused
+all-IDLE timeouts on all three original dev clips. Generation now defaults to
+empty context; the real fixed CLI produces `Red and green.` and STOP. Explicit
+prefixes remain possible. Seven local tests pass. Cached/full predictions
+agree at all 34 tested lexical positions; forced correct event timing does
+not fix malformed words. Audio-silence calibration remains a measured design
+concern, without a demonstrated training fix.
+
+Full evidence, quantitative comparisons, limitations and reproduction commands
+are in `notes/one_epoch_diagnosis.md`; logs, probes and early adapters are saved
+under the ignored `outputs/` diagnosis/pilot folders. The completed one-epoch
+weights were not changed by these diagnostic runs.
+
 ## 2026-09-30 — one full TASTE epoch on A100
 
 The user selected the current 44,000-conversation TASTE recipe over the stale

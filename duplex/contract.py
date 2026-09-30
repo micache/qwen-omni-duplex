@@ -11,6 +11,8 @@ DEFAULT_SYSTEM_PROMPT = "You are a concise spoken-dialogue assistant."
 
 
 def prompt_token_ids(tokenizer: object, system_prompt: str = DEFAULT_SYSTEM_PROMPT) -> list[int]:
+    if not system_prompt:
+        return []
     template = getattr(tokenizer, "apply_chat_template", None)
     if callable(template):
         values = template([{"role": "system", "content": system_prompt}], tokenize=True,

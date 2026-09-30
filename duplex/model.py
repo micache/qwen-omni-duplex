@@ -13,7 +13,7 @@ from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
 
 from .timeline import IGNORE_LABEL, ControlTokenIds, TimelineSpec
-from .contract import DEFAULT_SYSTEM_PROMPT, prompt_token_ids
+from .contract import prompt_token_ids
 
 
 MODEL_ID = "Qwen/Qwen2.5-Omni-3B"
@@ -149,9 +149,9 @@ class QwenDuplexThinker(nn.Module):
         get_base_model = getattr(self.thinker, "get_base_model", None)
         return get_base_model() if callable(get_base_model) else self.thinker
 
-    def generate(self, audio_path: str | "Path", *, system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+    def generate(self, audio_path: str | "Path", *, system_prompt: str = "",
                  max_new_tokens: int = 256) -> "DuplexGenerationResult":
-        """Generate from a complete audio file with one persistent streaming cache."""
+        """Generate with training's empty context unless an explicit prefix is supplied."""
         from pathlib import Path
         import numpy as np
         import soundfile as sf

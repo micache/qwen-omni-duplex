@@ -32,6 +32,12 @@ Each example is laid out on a fixed 25 Hz timeline. The audio is processed in tw
 
 The implementation is in [`duplex/turn_packed.py`](duplex/turn_packed.py) (timeline/data), [`duplex/model.py`](duplex/model.py) (fusion and loss), and [`duplex/streaming.py`](duplex/streaming.py) (generation). The training recipe is [`configs/turn_packed_main.yaml`](configs/turn_packed_main.yaml); experiment details and limitations are in [`notes/experiments.md`](notes/experiments.md).
 
+The completed one-epoch run still produces malformed or repetitive held-out
+answers. [The diagnosis](notes/one_epoch_diagnosis.md) compares early checkpoints,
+native language retention and the inference path. Generation defaults to the
+empty text context used in training; an explicit `--system` prefix changes that
+context and is outside the current checkpoint's training distribution.
+
 To replay either saved trace in a terminal, from the repository root:
 
 ```bash

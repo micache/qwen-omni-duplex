@@ -1,5 +1,40 @@
 # Experiments
 
+## 2026-09-30 — native retention, early stopping and fusion diagnosis
+
+Starting code revision `8c319a5`, same cached Qwen2.5-Omni-3B Thinker, TASTE
+and A100 as the completed epoch. Compared native chat, teacher-forced duplex,
+streamed responses, adapter strengths and same-input cached/full execution.
+Two deterministic 200-update pilots tested 2e-4 versus 5e-5; the higher-rate
+pilot exactly reproduced original training loss logs through step 200.
+
+On the same first six dev rows / six native questions:
+
+| run | native correct | duplex text NLL | stream exact |
+| --- | ---: | ---: | ---: |
+| 2e-4 / 50 updates | 6/6 | 6.743 | 0/6 |
+| 2e-4 / 200 updates | 6/6 | 4.210 | 0/6 |
+| 5e-5 / 50 updates | 6/6 | 6.756 | 0/6 |
+| 5e-5 / 200 updates | 6/6 | 4.959 | 0/6 |
+| original / 1,500 updates | 0/6 | 1.890 | 1/6 |
+| original / 1,919 updates | 0/6 | 1.654 | 1/6 |
+
+The full-strength final adapter suppresses native chat; quarter strength
+restores most native answers but worsens duplex text. The full-forward and
+cached decoder agree at 34/34 checked lexical positions. Correct event timing
+and one forced correct initial token do not repair lexical errors. In a 31-row
+token decomposition, separators are 95.6% correct versus 65.4% for tokens
+containing alphanumeric characters. Data is short (median seven response
+tokens), but the native base model can interpret the kitchen-tools recording.
+
+All three original dev clips become all-IDLE timeouts when the old default
+system prefix is inserted; training uses empty context. Fixed the CLI and
+model generation defaults and empty-string tokenization. The real fixed CLI
+produces the color reference and STOP; seven local tests pass. No fusion or
+weight changes were made to the original adapter based on exploratory norm
+measurements. See [the full diagnosis](one_epoch_diagnosis.md) for exact
+commands, source papers, artifacts and the untested 200–1,500 interval.
+
 ## 2026-09-30 — full one-epoch TASTE run on A100
 
 The user explicitly chose the current TASTE recipe over the stale DailyTalk-only
