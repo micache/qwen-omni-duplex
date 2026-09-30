@@ -1,5 +1,26 @@
 # Progress
 
+## 2026-09-30 — one full TASTE epoch on A100
+
+The user selected the current 44,000-conversation TASTE recipe over the stale
+DailyTalk-only instruction and authorized installing dependencies and downloading
+the public assets. Restored the repository Python 3.11 environment from the
+pinned requirements and downloaded the pinned Qwen snapshot, TASTE and MUSAN.
+Added an explicit one-epoch configuration, padded-frame batch budgeting, fused
+AdamW, loader workers, and an equivalent flattened cross-entropy layout.
+The full epoch completed under `outputs/one-epoch-a100/`: 1,919 updates visited
+all 44,000 conversations and 6,261,750 frames exactly once. Training plus full
+4,000-row dev evaluation took 1,369 seconds. Dev weighted/text losses were
+0.3330/1.0720. Fresh-process adapter reload passed. All three fixed training
+samples generated exact user-only reference text; all three fixed dev samples
+generated malformed/repetitive text. All six user-only runs reached STOP,
+but none of the aligned event sequences matched every target frame. Four
+synthetic cases were responding at interruption onset and stopped within one
+logical frame; two had already ended and are ineligible for that check.
+Logs, adapter archive, full report and traces remain in the ignored run folder.
+The checkpoint is useful experiment evidence, not a reliable generalized
+full-duplex assistant. SSH authentication currently blocks pushing changes.
+
 ## 2026-09-28 — repository cleanup
 
 Stopped tracking the old `outputs/turn-packed-main-batch8` run directory. Its

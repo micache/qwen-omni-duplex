@@ -427,11 +427,11 @@ class QwenDuplexThinker(nn.Module):
         torch.Tensor,
     ]:
         token_losses = F.cross_entropy(
-            logits.transpose(1, 2),
-            labels,
+            logits.reshape(-1, logits.shape[-1]),
+            labels.reshape(-1),
             reduction="none",
             ignore_index=IGNORE_LABEL,
-        )
+        ).reshape_as(labels)
         target_groups = self._target_groups(labels)
         applied_weights = torch.zeros_like(token_losses)
         group_losses: dict[str, torch.Tensor] = {}

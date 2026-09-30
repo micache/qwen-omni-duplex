@@ -1,5 +1,95 @@
 # Experiments
 
+## 2026-09-30 — full one-epoch TASTE run on A100
+
+The user explicitly chose the current TASTE recipe over the stale DailyTalk-only
+instruction and authorized dependency/model/data downloads. This fresh clone
+started at repository commit `38c83eb`. Installed the pinned requirements into
+Python 3.11.16; the uv invocation required `--index-strategy unsafe-best-match`
+because the PyTorch index also exposes an older `requests` wheel. Dependencies
+passed `uv pip check` (94 packages). Hardware: one NVIDIA A100-SXM4-40GB,
+driver 580.173.02. Model: direct BF16 `Qwen/Qwen2.5-Omni-3B` Thinker at
+`f75b40e3da2003cdd6e1829b1f420ca70797c34e`, with the frozen vision tower
+removed, frozen audio/embedding/head weights and the existing rank-16 decoder
+LoRA recipe. Native PAD/BOS/EOS controls, additive fusion, fixed 2-second
+chunks, 25 Hz and weights text/IDLE/START/STOP = 1/0.1/4/4 were retained.
+TASTE snapshot: `028e90e49bccfd0ca27f85e1dc4137decc661c83`; MUSAN snapshot:
+`76f9882cfa4475efe11508ac9aa32722f84ca5b7`.
+
+Configuration: `configs/turn_packed_one_epoch_a100.yaml`. A shuffled,
+length-grouped padded-frame budget of 3,360 with sample cap 128 yielded actual
+batches of 4–48 (median 23), 1,919 updates, no accumulation and no dropped
+conversation. Used fused AdamW, four persistent loader workers, TF32 enabled,
+constant 2e-4 and gradient checkpointing disabled. Full gradient audits ran
+at the first/last update and every 100 updates; loss checks remained per batch.
+Noise and synthetic interruption each retained probability 0.2.
+
+Microbenchmarks included actual forward/backward/optimizer updates. At 135
+frames, the original layout without checkpointing reached 25.34 samples/s at
+batch 24. Flattening cross-entropy to `[events, vocabulary]` improved this to
+38.48 samples/s with the same loss/gradient formula. Batch 32 ran out of memory.
+Checkpointing fit median-length batch 96 but only reached 14.04 samples/s.
+At 566 frames the optimized non-checkpointed path fit batch 6 but not batch 8.
+The frame budget therefore increases batches on short examples while retaining
+complete long conversations. These are microbenchmarks, not an epoch speedup
+comparison. Raw results are in the ignored run directory.
+
+Reproduction commands, after public assets are prepared:
+
+```bash
+.venv/bin/python scripts/prepare_taste_lengths.py --output outputs/one-epoch-a100/lengths.json
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1 .venv/bin/python -u train.py --config configs/turn_packed_one_epoch_a100.yaml > outputs/one-epoch-a100/train.log 2>&1
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false .venv/bin/python -u scripts/evaluate_taste_samples.py --config configs/turn_packed_one_epoch_a100.yaml > outputs/one-epoch-a100/inference.log 2>&1
+```
+
+The epoch plus full dev evaluation took 1,369.072 seconds; dev evaluation alone
+took 90.428 seconds. Training mean loss was 0.628777; the first batch was
+9.828 and the final 19-update window averaged 0.334857. Dev weighted/text
+losses were 0.333011/1.071998 over all 4,000 dev rows, using the recipe's
+augmented collator. Peak allocated/reserved memory was
+34,151,796,736/40,259,026,944 bytes. Summing the saved training label counts
+verified exactly 44,000 START, 44,000 STOP, 322,164 text and 5,851,586 IDLE:
+all 44,000 conversations and 6,261,750 frames were processed once. Final
+adapter and reconstruction metadata are under `outputs/one-epoch-a100/final/`;
+the downloadable archive is `adapter-one-epoch.tar.gz` in that run folder.
+
+Fresh-process reload and fixed inference took 228.423 seconds. Selection was
+the first three train rows and first three dev rows, fixed before evaluation.
+Used greedy decoding, empty context matching training, no noise, four allowed
+silent chunks and a 128-token cap. Three input views were compared: training
+audio (user plus reference-duration silence), raw user-only audio, and user
+audio padded only to the next 2-second boundary, with no reference length.
+
+| split / sample | reference | raw user-only generation |
+| --- | --- | --- |
+| train / 047388 | Red and green. | Red and green. |
+| train / 001431 | I got a promotion at work! | I got a promotion at work! |
+| train / 018014 | Two, three, four. | Two, three, four. |
+| dev / 010890 | Baseball, boxing, football, soccer, and hockey. | Sug, basketball, baseball, baseball, and baseball. |
+| dev / 010838 | Bears, wolves, eagles, and sharks. | Tions, bear, bear, and bear. |
+| dev / 012247 | A whisk, a blender, and a spatula. | Blrying, knife, and whisk. |
+
+All three train responses were exact and all three dev responses had malformed
+or repetitive content, across all three input views. These dev failures are
+more than alternative valid answers; chunk padding did not repair them.
+All six raw user-only runs produced one START/text/STOP segment without timeout.
+None of the six training-audio traces exactly matched every target frame.
+In six synthetic interruption variants, four were still responding at the
+injected onset and emitted STOP within 0–1 logical frames (0–0.04 s); two had
+already stopped and do not establish interruption success. Logical-frame
+delays are not wall-clock or live latency measurements: complete 2-second
+chunks supply all their features together. Interrupted text did not generally
+match the precise target prefix. This small sample is a diagnostic, not a
+generalization benchmark or reliable full-duplex acceptance gate.
+
+The new local correctness suite passed six tests covering epoch validation,
+complete sampler coverage/memory bounds/determinism and weighted-loss/gradient
+parity. Compilation and whitespace checks passed. `train.log`, `metrics.jsonl`,
+`inference.log`, `inference-report.json`, `coverage.json`, data revisions,
+run manifest, sample WAVs and event traces are saved locally under the ignored
+run directory. SSH access to the authorized remote currently fails with
+`Permission denied (publickey)`; no remote history was changed.
+
 ## 2026-09-16 — turn-packed data-path correctness check
 
 This was a data-path check, not a training run. The selected public

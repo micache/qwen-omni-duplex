@@ -20,7 +20,7 @@ import numpy as np
 import torch
 import yaml
 from torch import nn
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
 from transformers import Trainer, TrainerCallback, TrainingArguments
 
 from .dataset import (
@@ -294,8 +294,8 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
             if not 100 <= training.get("max_steps", 0) <= 1000:
                 raise ValueError("Complete-conversation overfit requires 100-1000 optimizer steps.")
         else:
-            if training.get("num_train_epochs") not in (3,):
-                raise ValueError("Complete-conversation main training requires three epochs.")
+            if training.get("num_train_epochs") not in (1, 3):
+                raise ValueError("Complete-conversation main training requires one or three epochs.")
             if training.get("max_steps") is not None:
                 raise ValueError("Complete-conversation main training must not set max_steps.")
     elif isinstance(training.get("max_steps"), bool) or not isinstance(training.get("max_steps"), int) or training["max_steps"] < 1:
@@ -307,6 +307,14 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
         raise ValueError(
             "training.batch_size and gradient_accumulation_steps must be positive."
         )
+    frame_budget = training.get("max_batch_frames")
+    if frame_budget is not None:
+        if isinstance(frame_budget, bool) or not isinstance(frame_budget, int) or frame_budget < 1:
+            raise ValueError("training.max_batch_frames must be a positive integer.")
+        if data.get("dataset") != TURN_PACKED_DATASET_VIEW or not full_conversations:
+            raise ValueError("Frame-budget batches require complete TASTE conversations.")
+        if training["gradient_accumulation_steps"] != 1 or not data.get("lengths_file"):
+            raise ValueError("Frame-budget batches require accumulation one and data.lengths_file.")
     if selected_windows is not None and not 100 <= training["max_steps"] <= 300:
         raise ValueError("Selected-window runs require 100-300 optimizer steps.")
     backends = logging.get("backends", [])
@@ -583,6 +591,15 @@ def build_datasets_and_collator(
             if evaluate
             else None
         )
+        if training.get("max_batch_frames") is not None:
+            lengths = json.loads(Path(data["lengths_file"]).read_text())
+            for split, dataset in (("train", train_dataset), ("dev", eval_dataset)):
+                if dataset is None:
+                    continue
+                rows = lengths[split]
+                if [row["id"] for row in rows] != list(dataset.dataset["idx"]):
+                    raise ValueError(f"{split} length index differs from the local dataset.")
+                dataset.frame_lengths = [row["frames"] for row in rows]
         noise_options = _mapping(data.get("noise", {}), "data.noise")
         noise_config = NoiseAugmentationConfig(
             probability=float(noise_options.get("probability", 0.0)),
@@ -782,9 +799,12 @@ def build_datasets_and_collator(
 
 
 class GradientAuditCallback(TrainerCallback):
-    """Audit gradients immediately before each optimizer update."""
+    """Audit gradients before selected optimizer updates (every update by default)."""
 
-    def __init__(self, targets: Sequence[str]) -> None:
+    def __init__(self, targets: Sequence[str], *, steps: int = 1) -> None:
+        if isinstance(steps, bool) or not isinstance(steps, int) or steps < 1:
+            raise ValueError("Gradient audit interval must be a positive integer.")
+        self.steps = steps
         self.targets = tuple(targets)
         self.nonzero_gradient_names: set[str] = set()
         self.checked_steps = 0
@@ -792,6 +812,9 @@ class GradientAuditCallback(TrainerCallback):
     def on_pre_optimizer_step(self, args, state, control, model=None, **kwargs):
         if model is None:
             raise RuntimeError("Gradient audit received no model.")
+        update = state.global_step + 1
+        if update != 1 and update != state.max_steps and update % self.steps:
+            return
         self.checked_steps += 1
         for name, parameter in model.named_parameters():
             gradient = parameter.grad
@@ -859,6 +882,26 @@ class Session08Trainer(Trainer):
         totals["frames_processed"] += valid_count
         totals["tokens_processed"] += int(outputs.target_counts["text"].detach())
         return (outputs.loss, outputs) if return_outputs else outputs.loss
+
+    def get_train_dataloader(self):
+        budget = self.raw_config["training"].get("max_batch_frames")
+        if budget is None:
+            return super().get_train_dataloader()
+        from .batching import FrameBudgetBatchSampler
+
+        sampler = FrameBudgetBatchSampler(
+            self.train_dataset.frame_lengths, max_frames=budget,
+            max_batch_size=self.args.per_device_train_batch_size,
+            seed=self.args.data_seed,
+        )
+        loader = DataLoader(
+            self.train_dataset, batch_sampler=sampler, collate_fn=self.data_collator,
+            num_workers=self.args.dataloader_num_workers,
+            pin_memory=self.args.dataloader_pin_memory,
+            persistent_workers=self.args.dataloader_persistent_workers,
+            prefetch_factor=self.args.dataloader_prefetch_factor,
+        )
+        return self.accelerator.prepare(loader)
 
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
         del prediction_loss_only, ignore_keys
@@ -1018,6 +1061,7 @@ def make_training_arguments(config: Mapping[str, Any], *, max_steps: int | None 
         weight_decay=float(training.get("weight_decay", 0.0)),
         max_grad_norm=float(training.get("max_grad_norm", 1.0)),
         bf16=True,
+        tf32=training.get("tf32"),
         gradient_checkpointing=bool(training["gradient_checkpointing"]),
         gradient_checkpointing_kwargs={"use_reentrant": False},
         eval_strategy=training.get("eval_strategy", "no"),
@@ -1035,6 +1079,9 @@ def make_training_arguments(config: Mapping[str, Any], *, max_steps: int | None 
         data_seed=training["split_seed"],
         full_determinism=bool(training.get("full_determinism", False)),
         dataloader_num_workers=int(training.get("dataloader_num_workers", 0)),
+        dataloader_persistent_workers=bool(training.get("dataloader_persistent_workers", False)),
+        dataloader_prefetch_factor=training.get("dataloader_prefetch_factor"),
+        accelerator_config={"even_batches": False} if training.get("max_batch_frames") else None,
         remove_unused_columns=False,
         prediction_loss_only=True,
         auto_find_batch_size=False,
@@ -1055,7 +1102,7 @@ def make_trainer(
     *,
     max_steps: int | None = None,
 ) -> tuple[Session08Trainer, GradientAuditCallback]:
-    audit = GradientAuditCallback(targets)
+    audit = GradientAuditCallback(targets, steps=config["training"].get("gradient_audit_steps", 1))
     trainer = Session08Trainer(
         model=model,
         args=make_training_arguments(config, max_steps=max_steps),
