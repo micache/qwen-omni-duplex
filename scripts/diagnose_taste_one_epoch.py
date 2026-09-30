@@ -91,10 +91,12 @@ def causal_probe(model, tokenizer, batch, timeline, audio, mode):
     cache, previous, selected_ids, details = None, None, [], []
     full_logits = model(**batch).logits[0] if mode == 'gold_history' else None
     lexical_count = 0
+    response_active = False
     for frame, target in enumerate(gold):
         text, tm, control, cm = frame_event_inputs(previous, bos_token_id=model.base_thinker.config.bos_token_id,
             control_ids=(model.control_tokens.idle, model.control_tokens.start, model.control_tokens.stop))
-        fused = audio[:, frame:frame + 1] + embedding(torch.tensor([[text]], device='cuda')) * tm + embedding(torch.tensor([[control]], device='cuda')) * cm
+        frame_audio = model.scale_audio_for_response(audio[:, frame:frame + 1], response_active)
+        fused = frame_audio + embedding(torch.tensor([[text]], device='cuda')) * tm + embedding(torch.tensor([[control]], device='cuda')) * cm
         result = model.base_thinker.model(inputs_embeds=fused,
             attention_mask=torch.ones((1, frame + 1), dtype=torch.bool, device='cuda'),
             position_ids=torch.tensor([[frame]], device='cuda'), past_key_values=cache, use_cache=True, return_dict=True)
@@ -119,6 +121,10 @@ def causal_probe(model, tokenizer, batch, timeline, audio, mode):
             selected_ids.append(selected)
             lexical_count += 1
         previous = selected
+        if selected == model.control_tokens.start:
+            response_active = True
+        elif selected == model.control_tokens.stop:
+            response_active = False
         if target == model.control_tokens.stop:
             break
     return {'mode': mode, 'text': tokenizer.decode(selected_ids, clean_up_tokenization_spaces=False), 'details': details}

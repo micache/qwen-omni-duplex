@@ -160,6 +160,12 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
     }
     if any(task.get(key) != value for key, value in expected_task.items()):
         raise ValueError(f"task must match {expected_task}.")
+    audio_gain = float(task.get("audio_gain", 1.0))
+    if not math.isfinite(audio_gain) or not 0 < audio_gain <= 1:
+        raise ValueError("task.audio_gain must be finite and in (0, 1].")
+    response_gain = float(task.get("response_audio_gain", 1.0))
+    if not math.isfinite(response_gain) or not 0 < response_gain <= 1:
+        raise ValueError("task.response_audio_gain must be finite and in (0, 1].")
     if data.get("dataset") not in {DATASET_VIEW, TURN_PACKED_DATASET_VIEW, INSTRUCTS2S_VIEW}:
         raise ValueError(
             "Unsupported training dataset view."
@@ -508,6 +514,8 @@ def build_training_model(config: Mapping[str, Any]) -> tuple[QwenDuplexThinker, 
         loss_weights=NextEventLossWeights(**config["loss_weights"]),
     )
     duplex.processor = processor
+    duplex.audio_gain = float(config["task"].get("audio_gain", 1.0))
+    duplex.response_audio_gain = float(config["task"].get("response_audio_gain", 1.0))
     if config["data"]["dataset"] == INSTRUCTS2S_VIEW:
         # Apply the same FP32/TF32 policy before training and standalone inference.
         torch.backends.cuda.matmul.allow_tf32 = bool(config["training"].get("tf32", False))
@@ -1047,6 +1055,8 @@ def write_checkpoint_metadata(
         },
         "task": dict(config["task"]),
         "audio_input": {"pad_to_full_chunks": bool(getattr(model, "pad_audio_to_full_chunks", False)),
+                        "fusion_gain": getattr(model, "audio_gain", 1.0),
+                        "response_fusion_gain": getattr(model, "response_audio_gain", 1.0),
                         "encoder_precision": "float32" if getattr(model, "audio_encoder_fp32", False) else "bfloat16",
                         "context_token_ids": [], "dataset_view": config["data"]["dataset"]},
         "loss_weights": dict(config["loss_weights"]),
@@ -1656,6 +1666,21 @@ def _reference_logits(model: nn.Module, batch: Mapping[str, torch.Tensor]) -> to
 
 
 def _load_adapter_weights(model: QwenDuplexThinker, checkpoint: Path) -> None:
+    metadata_path = checkpoint / "duplex_config.yaml"
+    if metadata_path.exists():
+        saved_audio = yaml.safe_load(metadata_path.read_text()).get("audio_input", {})
+        if saved_audio.get("dataset_view") == INSTRUCTS2S_VIEW:
+            expected_audio = {
+                "pad_to_full_chunks": bool(getattr(model, "pad_audio_to_full_chunks", False)),
+                "fusion_gain": getattr(model, "audio_gain", 1.0),
+                "response_fusion_gain": getattr(model, "response_audio_gain", 1.0),
+                "encoder_precision": "float32" if getattr(model, "audio_encoder_fp32", False) else "bfloat16",
+            }
+            defaults = {"fusion_gain": 1.0, "response_fusion_gain": 1.0}
+            if (not getattr(model, "requires_empty_context", False)
+                    or any(saved_audio.get(key, defaults.get(key)) != value
+                           for key, value in expected_audio.items())):
+                raise ValueError("Inference audio contract differs from the adapter's training configuration.")
     from peft.utils.save_and_load import load_peft_weights, set_peft_model_state_dict
 
     weights = load_peft_weights(str(checkpoint), device="cpu", local_files_only=True)

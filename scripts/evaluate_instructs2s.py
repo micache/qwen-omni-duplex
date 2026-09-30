@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 import sys
 import time
 from collections import Counter
@@ -9,7 +10,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import numpy as np
 import soundfile as sf
 import torch
 
@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader
 from duplex.streaming import QwenDuplexStreamer, pad_audio_to_chunk_boundary, split_fixed_audio_chunks, write_trace_jsonl
 from duplex.training import MODEL_INPUTS, _load_adapter_weights, build_training_model, load_training_config, seed_everything
 from duplex.turn_packed import NoiseAugmentationConfig, PackedConversation, TurnPackedCollator
+from duplex.turn_packed import decode_audio
 from diagnose_taste_one_epoch import GENERAL, audio_vectors, causal_probe, native
 
 
@@ -31,6 +32,7 @@ def main():
     parser.add_argument('--skip-native', action='store_true')
     parser.add_argument('--native-audio', action='store_true')
     parser.add_argument('--all-dev-teacher', action='store_true')
+    parser.add_argument('--short-audio-probes', action='store_true')
     parser.add_argument('--check-parity', action='store_true')
     parser.add_argument('--samples-per-split', type=int, default=6)
     args = parser.parse_args()
@@ -68,6 +70,38 @@ def main():
             samples.append(('preflight', index, row, conversation))
     else:
         raise FileNotFoundError('Dataset preparation has not finished.')
+    if args.short_audio_probes:
+        import pyarrow.parquet as pq
+        # Lock the selection before observing generations. These short-answer
+        # questions are excluded by the training subset's 16-token minimum.
+        selected_ids = ['instruct_en_11', 'instruct_en_20', 'instruct_en_56',
+                        'instruct_en_92', 'instruct_en_93', 'instruct_en_121']
+        used_rows = [row for split in ('train', 'dev') for row in
+                     InstructS2SFirstTurnDataset(root, split=split).records]
+        used = {row['id'] for row in used_rows}
+        used_prompts = {' '.join(row['prompt'].casefold().split()) for row in used_rows}
+        assert not used.intersection(selected_ids)
+        source = pq.read_table('outputs/instructs2s-inspection/part-0.parquet',
+            columns=['id', 'round', 'question', 'answer', 'question_audio']).to_pylist()
+        rows = {row['id']: row for row in source if row['round'] == 1 and row['id'] in selected_ids}
+        for index, sample_id in enumerate(selected_ids):
+            source_row = rows[sample_id]
+            prompt = source_row['question'].removeprefix('<USER>:').strip()
+            assert ' '.join(prompt.casefold().split()) not in used_prompts
+            waveform = decode_audio(source_row['question_audio'], field='question_audio')
+            path = (args.output / 'input-audio' / f'{sample_id}.flac').resolve()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            sf.write(path, waveform, 16000, subtype='PCM_16')
+            waveform, _ = sf.read(path, dtype='float32')
+            text = source_row['answer'].strip()
+            tokens = processor.tokenizer.encode(text, add_special_tokens=False)
+            assistant_samples = math.ceil((len(tokens)+2)/50)*32000
+            row = {'id': sample_id, 'prompt': prompt,
+                'answer': text, 'response_tokens': len(tokens), 'audio': str(path),
+                'user_samples': len(waveform), 'assistant_samples': assistant_samples}
+            conversation = PackedConversation(sample_id, pad_audio_to_chunk_boundary(waveform),
+                assistant_samples, text, user_valid_samples=len(waveform))
+            samples.append(('short_audio_ood', index, row, conversation))
     report = {'adapter': str(args.adapter) if args.adapter else None, 'context_token_ids': [],
               'selection': 'first rows of each split; no cherry picking', 'cases': [], 'native_text': []}
     def save():
@@ -138,6 +172,8 @@ def main():
                     'embedding_max_abs_difference_after_bf16_fusion_cast': maximum_embedding_difference,
                     'embedding_max_relative_rms_after_bf16_fusion_cast': maximum_relative_rms,
                     'embedding_max_abs_difference_fp32': maximum_fp32_difference,
+                    'audio_frame_norm_median': float(training_audio.float().norm(dim=-1).median()),
+                    'text_token_embedding_norm_median': float(model.base_thinker.get_input_embeddings()(gold[lexical]).float().norm(dim=-1).median()),
                     'full_chunk_masks': bool((cpu_batch['preconv_feature_lengths'] == 200).all())}
                 if index == 0:
                     cached = causal_probe(model, processor.tokenizer, batch, timeline, training_audio, 'gold_history')

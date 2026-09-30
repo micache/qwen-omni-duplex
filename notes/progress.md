@@ -984,5 +984,25 @@ bounded first-turn InstructS2S preparation path, direct FLAC/JSONL dataset view,
 shared complete-chunk padding, and rejection of nonempty inference context.
 The frozen audio encoder now uses FP32 for this recipe after batch-size-dependent
 BF16 differences appeared in preflight; the text decoder remains BF16.
-Details and eventual results are in [the experiment note](instructs2s_experiment.md).
-Preparation is ongoing; no completed epoch is claimed yet.
+Details are in [the experiment note](instructs2s_experiment.md). Preparation
+completed: 44,000 train / 1,000 dev examples, 6.54 GB, median 47 response tokens
+and 2.22 million pre-augmentation training response tokens. A full epoch completed
+all 3,750 updates in 79.8 minutes. The 4,000-frame budget passes on the A100 with
+expandable CUDA allocator segments; 4,320 frames failed the memory benchmark.
+
+Fresh-reload no-prompt inference on 12 train / 12 dev questions and six excluded
+spoken fact probes remains largely repetitive or incomplete. Clean dev text CE
+is 3.99616 and lexical teacher-forced accuracy is 28.01%. Correct isolated answers
+include Madrid and a held-out mock-trial question. Logs, checkpoint coverage,
+actual outputs and traces are preserved under `outputs/instructs2s-one-epoch/`.
+
+Three matched 200-update pilots isolate fusion gain. Text CE is 5.92312 with
+gain 1, 1.94094 with gain 0.03 everywhere, and 1.13768 when gain drops only after
+START. Global attenuation generates fluent unrelated answers. Response-only
+attenuation correctly answers four of six spoken fact probes; the other two end
+early, and longer held-out answers still have factual/control errors. All early
+adapters retain the 12 simple native-text answers by meaning; the original full
+epoch retains none under that format. This supports testing response-only gain
+with checkpoint retention gates, not claiming a solved or fully trained model.
+The response-state gain is causal and shared by training and streaming; reload
+rejects incompatible audio preparation/gain and generation rejects text context.

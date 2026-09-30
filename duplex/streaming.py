@@ -363,6 +363,8 @@ class QwenDuplexStreamer:
             max_new_tokens = getattr(model, 'default_max_new_tokens', 256)
         if max_silent_chunks < 0:
             raise ValueError("max_silent_chunks must be non-negative.")
+        if max_new_tokens < 1:
+            raise ValueError("max_new_tokens must be positive.")
         if temperature <= 0 or not math.isfinite(temperature):
             raise ValueError("temperature must be finite and positive.")
         if top_k is not None and top_k <= 0:
@@ -518,6 +520,8 @@ class QwenDuplexStreamer:
                          self.model.control_tokens.stop))
         text_embedding = embedding(torch.tensor([[text_id]], dtype=torch.long, device=self.device)) * text_mask
         control_embedding = embedding(torch.tensor([[control_id]], dtype=torch.long, device=self.device)) * control_mask
+        if getattr(self.model, "response_audio_gain", 1.0) != 1.0:
+            audio_feature = self.model.scale_audio_for_response(audio_feature, state is ResponseState.ACTIVE)
         fused = audio_feature + text_embedding + control_embedding
         self._sync()
         started = self.clock()

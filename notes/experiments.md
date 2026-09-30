@@ -661,11 +661,34 @@ inference speed.
 
 ## 2026-09-30 — InstructS2S first-turn comparison
 
-The next experiment selects 44,000 training and 1,000 held-out first turns from
+The experiment selects 44,000 training and 1,000 held-out first turns from
 InstructS2S, with complete 16–512-token answers and real question audio only.
 Shards are processed and discarded to stay within the local disk budget.
 It retains the prior rank-16 LoRA, constant 2e-4 learning rate and weighted loss,
 but also corrects padding and encoder precision in the audio contract. It is
 therefore a data-plus-input-contract comparison, not an isolated response-length
 ablation. See [the detailed note](instructs2s_experiment.md) for provenance,
-preflight measurements, reproduction commands, and results as they become available.
+preflight measurements, reproduction commands, and actual results.
+
+The prepared subset occupies 6.54 GB rather than retaining the 345 GB source
+archive. Training response length is median 47 tokens versus 7 in TASTE. Full
+training completed 3,750 updates / one visit per training example in 4,786.43
+seconds, using a 4,000-frame budget with expandable allocator segments. The
+original fragmented-allocator failed start is archived separately. Final-window
+text loss is 4.02080; augmented dev text loss is 4.02930. Clean 1,000-example dev
+text loss is 3.99616 and teacher-forced lexical accuracy is 28.01%. Actual raw
+question inference gives some correct facts but mostly malformed/repetitive
+answers. This is a failed generalization run despite successful epoch coverage.
+
+Matched 200-update fresh-base gain pilots give text losses 5.92312 (gain 1),
+1.94094 (gain 0.03 everywhere), and 1.13768 (gain 1 while listening / 0.03 while
+responding). Global attenuation is fluent but ungrounded. Response-only gain
+answers Paris, Madrid, six times two, and the rectangle's 50 square centimeters
+correctly, but truncates DNA and triangle answers. Longer held-out responses
+still contain errors. Training and inference derive response phase from past
+START/STOP events through one shared scaling helper; no generation prompt or
+reference timing is supplied. These are short diagnostics, not replacement
+full-epoch results. Their actual outputs live in each pilot's `evaluation/`.
+All three early adapters preserve 12 simple native-text answers by meaning;
+the full original adapter answers none of them correctly. Further training with
+response-only gain needs retention and completion gates before acceptance.

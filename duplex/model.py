@@ -157,6 +157,21 @@ class QwenDuplexThinker(nn.Module):
             self.base_thinker.audio_tower.eval()
         return self
 
+    def response_active_from_inputs(self, control_ids, control_mask):
+        """State before the current prediction, derived solely from past events."""
+        starts = control_mask.bool() & (control_ids == self.control_tokens.start)
+        stops = control_mask.bool() & (control_ids == self.control_tokens.stop)
+        return (starts.long() - stops.long()).cumsum(-1) > 0
+
+    def scale_audio_for_response(self, audio, active):
+        gain = getattr(self, "response_audio_gain", 1.0)
+        if gain == 1.0:
+            return audio
+        if isinstance(active, bool):
+            return (audio.float() * gain).to(audio.dtype) if active else audio
+        scale = torch.where(active, gain, 1.0).unsqueeze(-1)
+        return (audio.float() * scale).to(audio.dtype)
+
     def generate(self, audio_path: str | "Path", *, system_prompt: str = "",
                  max_new_tokens: int | None = None) -> "DuplexGenerationResult":
         """Generate with training's empty context unless an explicit prefix is supplied."""
@@ -376,7 +391,7 @@ class QwenDuplexThinker(nn.Module):
                     aligned = pad_sequence([row.to(device=device, dtype=dtype) for row in restored], batch_first=True)
                     if aligned.shape[1] < timeline_length:
                         aligned = F.pad(aligned, (0, 0, 0, timeline_length - aligned.shape[1]))
-                    return aligned
+                    return aligned * getattr(self, "audio_gain", 1.0)
 
         audio_precision = (torch.autocast(device_type=input_features.device.type, enabled=False)
                            if getattr(self, "audio_encoder_fp32", False) else nullcontext())
@@ -416,7 +431,7 @@ class QwenDuplexThinker(nn.Module):
             aligned = F.pad(aligned, (0, 0, 0, timeline_length - aligned.shape[1]))
         if tuple(aligned.shape[:2]) != (batch_size, timeline_length):
             raise ValueError("Restored Qwen audio features have an unexplained timeline length.")
-        return aligned.to(device=device, dtype=dtype)
+        return aligned.to(device=device, dtype=dtype) * getattr(self, "audio_gain", 1.0)
 
     def _target_groups(self, values: torch.Tensor) -> dict[str, torch.Tensor]:
         valid = values != IGNORE_LABEL
@@ -547,6 +562,11 @@ class QwenDuplexThinker(nn.Module):
         else:
             audio_embeddings = torch.zeros_like(text_embeddings)
 
+        if getattr(self, "response_audio_gain", 1.0) != 1.0:
+            if past_key_values is not None:
+                raise ValueError("Response-gain cached decoding requires the stateful streamer.")
+            active = self.response_active_from_inputs(control_ids, control_mask)
+            audio_embeddings = self.scale_audio_for_response(audio_embeddings, active)
         fused_embeddings = text_embeddings + audio_embeddings + control_embeddings
         context_length = 0
         if context_ids is not None:

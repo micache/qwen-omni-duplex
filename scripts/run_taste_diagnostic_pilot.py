@@ -1,4 +1,4 @@
-"""Train a short, explicitly step-limited TASTE diagnostic from the base model."""
+"""Train a short, explicitly step-limited turn-packed diagnostic from the base."""
 
 import argparse
 import sys
@@ -26,6 +26,7 @@ def main():
     config = load_training_config(args.config)
     config['training'].update(output_dir=str(args.output), learning_rate=args.learning_rate,
         eval_strategy='no', save_steps=50, save_total_limit=4)
+    config.setdefault('diagnostic', {})['max_steps_override'] = args.steps
     args.output.mkdir(parents=True)
     (args.output / 'pilot.yaml').write_text(yaml.safe_dump({
         'diagnostic_max_steps_override': args.steps, 'config': config}, sort_keys=False))
