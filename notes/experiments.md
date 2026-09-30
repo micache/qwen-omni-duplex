@@ -657,3 +657,15 @@ tokens, and one `STOP`. Thus `training_overfit_gate=PASS` and
 training-waveform path, with the dataset reference speech audible only for
 comparison. They do not demonstrate user-only response generation or live
 inference speed.
+
+
+## 2026-09-30 — InstructS2S first-turn comparison
+
+The next experiment selects 44,000 training and 1,000 held-out first turns from
+InstructS2S, with complete 16–512-token answers and real question audio only.
+Shards are processed and discarded to stay within the local disk budget.
+It retains the prior rank-16 LoRA, constant 2e-4 learning rate and weighted loss,
+but also corrects padding and encoder precision in the audio contract. It is
+therefore a data-plus-input-contract comparison, not an isolated response-length
+ablation. See [the detailed note](instructs2s_experiment.md) for provenance,
+preflight measurements, reproduction commands, and results as they become available.

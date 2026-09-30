@@ -52,6 +52,7 @@ class PackedConversation:
     assistant_samples: int
     assistant_text: str
     sample_rate_hz: int = TARGET_SAMPLE_RATE_HZ
+    user_valid_samples: int | None = None
 
     def __post_init__(self) -> None:
         waveform = np.asarray(self.user_waveform, dtype=np.float32)
@@ -61,6 +62,8 @@ class PackedConversation:
             raise ValueError("Packed conversations must be resampled to 16 kHz.")
         if self.assistant_samples <= 0:
             raise ValueError("assistant_samples must be positive.")
+        if self.user_valid_samples is not None and not 0 < self.user_valid_samples <= len(waveform):
+            raise ValueError('user_valid_samples must select the real speech within its padded buffer.')
         if not isinstance(self.assistant_text, str) or not self.assistant_text.strip():
             raise ValueError("assistant_text must be non-empty.")
         object.__setattr__(self, "user_waveform", waveform)
@@ -190,7 +193,8 @@ def build_turn_packed_timeline(
         )
 
     total_samples = len(conversation.user_waveform) + conversation.assistant_samples
-    user_frames = round(len(conversation.user_waveform) * 25 / conversation.sample_rate_hz)
+    speech_samples = conversation.user_valid_samples or len(conversation.user_waveform)
+    user_frames = round(speech_samples * 25 / conversation.sample_rate_hz)
     user_frames = min(max(user_frames, 1), valid_frame_count - 2)
     assistant_frames = valid_frame_count - user_frames
     required = len(token_ids) + 2

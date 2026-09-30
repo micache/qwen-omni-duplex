@@ -9,6 +9,11 @@ from duplex.model import NextEventLossWeights, QwenDuplexThinker
 from duplex.timeline import ControlTokenIds
 from duplex.training import load_training_config
 from generate import _context_token_ids
+import numpy as np
+from duplex.streaming import pad_audio_to_chunk_boundary, split_fixed_audio_chunks
+from duplex.streaming import QwenDuplexStreamer
+from types import SimpleNamespace
+from duplex.turn_packed import PackedConversation, build_turn_packed_timeline
 
 
 def test_empty_inference_context_does_not_add_untrained_chat_tokens():
@@ -21,6 +26,38 @@ def test_empty_inference_context_does_not_add_untrained_chat_tokens():
     assert prompt_token_ids(tokenizer, "") == []
     assert _context_token_ids(tokenizer, "", "") == []
     assert _context_token_ids(tokenizer, "Explicit prefix", "") == [151644, 123, 151645]
+
+
+def test_full_chunk_padding_preserves_speech_boundary_and_answer_targets():
+    waveform = np.linspace(-0.1, 0.1, 35000, dtype=np.float32)
+    padded = pad_audio_to_chunk_boundary(waveform)
+    assert len(padded) == 64000
+    np.testing.assert_array_equal(padded[:len(waveform)], waveform)
+    assert not padded[len(waveform):].any()
+    chunks = split_fixed_audio_chunks(padded)
+    assert [chunk.valid_samples for chunk in chunks] == [32000, 32000]
+    class Tokenizer:
+        def encode(self, text, **kwargs):
+            return [4, 5, 6]
+        def decode(self, ids, **kwargs):
+            return 'answer' if len(ids) == 3 else 'part'
+    conversation = PackedConversation('padded', padded, 32000, 'answer',
+                                      user_valid_samples=len(waveform))
+    timeline = build_turn_packed_timeline(conversation, tokenizer=Tokenizer(),
+        control_tokens=ControlTokenIds(idle=1, start=2, stop=3, thinker_vocab_size=11),
+        thinker_bos_token_id=2, valid_frame_count=150)
+    start = round(len(waveform) * 25 / 16000)
+    assert timeline.targets.events[start].kind.value == 'START'
+    assert [event.text_id for event in timeline.targets.events[start+1:start+4]] == [4,5,6]
+    assert timeline.targets.events[start+4].kind.value == 'STOP'
+    np.testing.assert_array_equal(timeline.user_waveform[:64000], padded)
+
+
+def test_prompt_is_rejected_for_empty_context_adapter():
+    streamer = QwenDuplexStreamer.__new__(QwenDuplexStreamer)
+    streamer.model = SimpleNamespace(requires_empty_context=True)
+    with pytest.raises(ValueError, match='context must be empty'):
+        streamer.run(np.zeros(32000, dtype=np.float32), sample_id='prompt', context_token_ids=[123])
 
 
 def test_frame_budget_keeps_all_samples_and_bounds_padding():

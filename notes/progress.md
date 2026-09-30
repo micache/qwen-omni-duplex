@@ -974,3 +974,15 @@ cached and chunked streaming decoding. User-only streaming produced no text.
 Added the report, verified frame trace, input MP3, and plain terminal video/GIF
 as a second README example. The README now presents the clips as training-
 example replays, with detailed diagnostics kept here and in the reports.
+
+
+## 2026-09-30 — longer-response InstructS2S preparation
+
+The user requested replacing TASTE with longer response supervision and matching
+training/inference audio inputs without a generation prompt. Added a pinned,
+bounded first-turn InstructS2S preparation path, direct FLAC/JSONL dataset view,
+shared complete-chunk padding, and rejection of nonempty inference context.
+The frozen audio encoder now uses FP32 for this recipe after batch-size-dependent
+BF16 differences appeared in preflight; the text decoder remains BF16.
+Details and eventual results are in [the experiment note](instructs2s_experiment.md).
+Preparation is ongoing; no completed epoch is claimed yet.

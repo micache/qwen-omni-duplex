@@ -46,6 +46,7 @@ from .model import (
     NextEventLossWeights,
     QwenDuplexThinker,
 )
+from .instructs2s import DATASET_VIEW as INSTRUCTS2S_VIEW, InstructS2SFirstTurnDataset
 from .timeline import (
     ControlTokenIds,
     EventKind,
@@ -159,14 +160,14 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
     }
     if any(task.get(key) != value for key, value in expected_task.items()):
         raise ValueError(f"task must match {expected_task}.")
-    if data.get("dataset") not in {DATASET_VIEW, TURN_PACKED_DATASET_VIEW}:
+    if data.get("dataset") not in {DATASET_VIEW, TURN_PACKED_DATASET_VIEW, INSTRUCTS2S_VIEW}:
         raise ValueError(
-            f"Training data must be {DATASET_VIEW} or {TURN_PACKED_DATASET_VIEW}."
+            "Unsupported training dataset view."
         )
     if data.get("synthetic_interruption") is not True:
         raise ValueError("Training data must enable synthetic interruption.")
 
-    if data.get("dataset") == TURN_PACKED_DATASET_VIEW:
+    if data.get("dataset") in {TURN_PACKED_DATASET_VIEW, INSTRUCTS2S_VIEW}:
         sample_id = data.get("overfit_sample_id")
         if sample_id is not None:
             if not isinstance(sample_id, str) or not sample_id:
@@ -311,8 +312,8 @@ def load_training_config(path: str | Path) -> dict[str, Any]:
     if frame_budget is not None:
         if isinstance(frame_budget, bool) or not isinstance(frame_budget, int) or frame_budget < 1:
             raise ValueError("training.max_batch_frames must be a positive integer.")
-        if data.get("dataset") != TURN_PACKED_DATASET_VIEW or not full_conversations:
-            raise ValueError("Frame-budget batches require complete TASTE conversations.")
+        if data.get("dataset") not in {TURN_PACKED_DATASET_VIEW, INSTRUCTS2S_VIEW} or not full_conversations:
+            raise ValueError("Frame-budget batches require complete turn-packed conversations.")
         if training["gradient_accumulation_steps"] != 1 or not data.get("lengths_file"):
             raise ValueError("Frame-budget batches require accumulation one and data.lengths_file.")
     if selected_windows is not None and not 100 <= training["max_steps"] <= 300:
@@ -507,6 +508,16 @@ def build_training_model(config: Mapping[str, Any]) -> tuple[QwenDuplexThinker, 
         loss_weights=NextEventLossWeights(**config["loss_weights"]),
     )
     duplex.processor = processor
+    if config["data"]["dataset"] == INSTRUCTS2S_VIEW:
+        # Apply the same FP32/TF32 policy before training and standalone inference.
+        torch.backends.cuda.matmul.allow_tf32 = bool(config["training"].get("tf32", False))
+        torch.backends.cudnn.allow_tf32 = bool(config["training"].get("tf32", False))
+        duplex.base_thinker.audio_tower.float()
+        duplex.audio_encoder_fp32 = True
+        duplex.pad_audio_to_full_chunks = True
+        duplex.requires_empty_context = True
+        duplex.default_max_silent_chunks = 16
+        duplex.default_max_new_tokens = 768
     assert_only_allowed_lora_trainable(duplex, targets)
     return duplex, processor, targets
 
@@ -566,12 +577,14 @@ def build_datasets_and_collator(
 
     data = config["data"]
     training = config["training"]
-    if data.get("dataset") == TURN_PACKED_DATASET_VIEW:
+    if data.get("dataset") in {TURN_PACKED_DATASET_VIEW, INSTRUCTS2S_VIEW}:
         root = data.get("root")
         if not isinstance(root, str) or not root:
             raise ValueError("data.root must point to a local TASTE snapshot.")
         sample_id = data.get("overfit_sample_id")
-        if sample_id is None:
+        if data["dataset"] == INSTRUCTS2S_VIEW:
+            train_dataset = InstructS2SFirstTurnDataset(root, split="train")
+        elif sample_id is None:
             train_dataset = load_local_taste(
                 root, split="train", max_samples=data.get("max_train_samples")
             )
@@ -587,7 +600,8 @@ def build_datasets_and_collator(
             train_dataset = TasteConversationDataset(source.dataset.select(matches))
         evaluate = sample_id is None and training.get("eval_strategy", "no") != "no"
         eval_dataset = (
-            load_local_taste(root, split="dev", max_samples=data.get("max_eval_samples"))
+            (InstructS2SFirstTurnDataset(root, split="dev") if data["dataset"] == INSTRUCTS2S_VIEW
+             else load_local_taste(root, split="dev", max_samples=data.get("max_eval_samples")))
             if evaluate
             else None
         )
@@ -597,7 +611,9 @@ def build_datasets_and_collator(
                 if dataset is None:
                     continue
                 rows = lengths[split]
-                if [row["id"] for row in rows] != list(dataset.dataset["idx"]):
+                ids = (dataset.conversation_ids if data["dataset"] == INSTRUCTS2S_VIEW
+                       else list(dataset.dataset["idx"]))
+                if [row["id"] for row in rows] != ids:
                     raise ValueError(f"{split} length index differs from the local dataset.")
                 dataset.frame_lengths = [row["frames"] for row in rows]
         noise_options = _mapping(data.get("noise", {}), "data.noise")
@@ -909,6 +925,24 @@ class Session08Trainer(Trainer):
             loss = self.compute_loss(model, inputs)
         return loss.detach(), None, None
 
+    def get_eval_dataloader(self, eval_dataset=None):
+        budget = self.raw_config["training"].get("max_batch_frames")
+        if budget is None:
+            return super().get_eval_dataloader(eval_dataset)
+        from .batching import FrameBudgetBatchSampler
+        dataset = self.eval_dataset if eval_dataset is None else eval_dataset
+        sampler = FrameBudgetBatchSampler(
+            dataset.frame_lengths, max_frames=budget,
+            max_batch_size=self.args.per_device_eval_batch_size,
+            seed=self.args.data_seed,
+        )
+        loader = DataLoader(dataset, batch_sampler=sampler, collate_fn=self.data_collator,
+            num_workers=self.args.dataloader_num_workers,
+            pin_memory=self.args.dataloader_pin_memory,
+            persistent_workers=self.args.dataloader_persistent_workers,
+            prefetch_factor=self.args.dataloader_prefetch_factor)
+        return self.accelerator.prepare(loader)
+
     def _consume_metrics(self, mode: str) -> dict[str, float]:
         totals = self.metric_totals.pop(mode, None)
         if not totals:
@@ -1012,6 +1046,9 @@ def write_checkpoint_metadata(
             "STOP": model.control_tokens.stop,
         },
         "task": dict(config["task"]),
+        "audio_input": {"pad_to_full_chunks": bool(getattr(model, "pad_audio_to_full_chunks", False)),
+                        "encoder_precision": "float32" if getattr(model, "audio_encoder_fp32", False) else "bfloat16",
+                        "context_token_ids": [], "dataset_view": config["data"]["dataset"]},
         "loss_weights": dict(config["loss_weights"]),
         "lora": {
             "rank": config["lora"]["rank"],

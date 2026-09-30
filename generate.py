@@ -84,7 +84,8 @@ def main() -> None:
         help="Optional system prefix; omit to match the empty context used in training.",
     )
     parser.add_argument("--text-context", default="")
-    parser.add_argument("--max-silent-chunks", type=int, default=4)
+    parser.add_argument("--max-silent-chunks", type=int)
+    parser.add_argument("--max-new-tokens", type=int)
     parser.add_argument("--sample", action="store_true")
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top-k", type=int)
@@ -111,6 +112,7 @@ def main() -> None:
         model,
         processor,
         max_silent_chunks=args.max_silent_chunks,
+        max_new_tokens=args.max_new_tokens,
         sample=args.sample,
         temperature=args.temperature,
         top_k=args.top_k,

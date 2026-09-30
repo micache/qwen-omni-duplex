@@ -122,6 +122,14 @@ class DuplexGenerationResult:
                    max(completed_times) if completed_times else None)
 
 
+def pad_audio_to_chunk_boundary(waveform: np.ndarray) -> np.ndarray:
+    """Use identical full-chunk zero padding for prepared data and raw inference."""
+    waveform = np.asarray(waveform, dtype=np.float32)
+    if waveform.ndim != 1 or not len(waveform) or not np.isfinite(waveform).all():
+        raise ValueError('Chunk padding requires finite, nonempty mono audio.')
+    return np.pad(waveform, (0, (-len(waveform)) % SAMPLES_PER_CHUNK))
+
+
 def split_fixed_audio_chunks(
     waveform: np.ndarray | torch.Tensor | Sequence[float],
     *,
@@ -337,18 +345,22 @@ class QwenDuplexStreamer:
         processor: object,
         tokenizer: object | None = None,
         *,
-        max_silent_chunks: int = 4,
+        max_silent_chunks: int | None = None,
         sample: bool = False,
         temperature: float = 1.0,
         top_k: int | None = None,
         feature_count_tolerance: int = 1,
-        max_new_tokens: int = 256,
+        max_new_tokens: int | None = None,
         clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         if model.timeline.chunk_seconds != CHUNK_SECONDS:
             raise ValueError("Streaming requires the validated fixed two-second timeline.")
         if model.timeline.frame_rate_hz != FRAME_RATE_HZ:
             raise ValueError("Streaming requires the validated 25 Hz timeline.")
+        if max_silent_chunks is None:
+            max_silent_chunks = getattr(model, 'default_max_silent_chunks', 4)
+        if max_new_tokens is None:
+            max_new_tokens = getattr(model, 'default_max_new_tokens', 256)
         if max_silent_chunks < 0:
             raise ValueError("max_silent_chunks must be non-negative.")
         if temperature <= 0 or not math.isfinite(temperature):
@@ -540,6 +552,12 @@ class QwenDuplexStreamer:
     ) -> StreamingResult:
         chunks = split_fixed_audio_chunks(waveform, sample_rate_hz=sample_rate_hz)
         input_duration = sum(chunk.valid_samples for chunk in chunks) / sample_rate_hz
+        if getattr(self.model, 'requires_empty_context', False) and context_token_ids:
+            raise ValueError('This adapter trains without a prompt; inference context must be empty.')
+        if getattr(self.model, 'pad_audio_to_full_chunks', False):
+            values = waveform.detach().cpu().numpy() if isinstance(waveform, torch.Tensor) else np.asarray(waveform)
+            chunks = split_fixed_audio_chunks(pad_audio_to_chunk_boundary(values), sample_rate_hz=sample_rate_hz)
+        encoded_duration = sum(chunk.valid_samples for chunk in chunks) / sample_rate_hz
         state = ResponseState.INACTIVE
         previous_event_id: int | None = None
         records: list[EventTraceRecord] = []
@@ -631,7 +649,7 @@ class QwenDuplexStreamer:
                     break
                 if silent_count >= self.max_silent_chunks:
                     break
-                tail_start = input_duration + silent_count * CHUNK_SECONDS
+                tail_start = encoded_duration + silent_count * CHUNK_SECONDS
                 pending_chunks.append(_silent_chunk(len(chunks) + silent_count, tail_start))
                 silent_count += 1
 

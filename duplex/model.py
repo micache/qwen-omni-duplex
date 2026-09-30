@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -149,8 +151,14 @@ class QwenDuplexThinker(nn.Module):
         get_base_model = getattr(self.thinker, "get_base_model", None)
         return get_base_model() if callable(get_base_model) else self.thinker
 
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if getattr(self, "audio_encoder_fp32", False):
+            self.base_thinker.audio_tower.eval()
+        return self
+
     def generate(self, audio_path: str | "Path", *, system_prompt: str = "",
-                 max_new_tokens: int = 256) -> "DuplexGenerationResult":
+                 max_new_tokens: int | None = None) -> "DuplexGenerationResult":
         """Generate with training's empty context unless an explicit prefix is supplied."""
         from pathlib import Path
         import numpy as np
@@ -158,6 +166,8 @@ class QwenDuplexThinker(nn.Module):
         from .dataset import resample_waveform_to_16khz
         from .streaming import DuplexGenerationResult, QwenDuplexStreamer
 
+        if max_new_tokens is None:
+            max_new_tokens = getattr(self, 'default_max_new_tokens', 256)
         if max_new_tokens < 1:
             raise ValueError("max_new_tokens must be positive.")
         processor = getattr(self, "processor", None)
@@ -368,11 +378,14 @@ class QwenDuplexThinker(nn.Module):
                         aligned = F.pad(aligned, (0, 0, 0, timeline_length - aligned.shape[1]))
                     return aligned
 
-        audio_output = self.base_thinker.get_audio_features(
-            input_features=input_features,
-            feature_attention_mask=feature_attention_mask,
-            return_dict=True,
-        )
+        audio_precision = (torch.autocast(device_type=input_features.device.type, enabled=False)
+                           if getattr(self, "audio_encoder_fp32", False) else nullcontext())
+        with audio_precision:
+            audio_output = self.base_thinker.get_audio_features(
+                input_features=input_features,
+                feature_attention_mask=feature_attention_mask,
+                return_dict=True,
+            )
         flattened = getattr(audio_output, "last_hidden_state", None)
         if flattened is None or flattened.ndim != 2:
             raise ValueError("Qwen audio tower must return flattened [positions, hidden].")
