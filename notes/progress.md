@@ -1031,3 +1031,8 @@ TensorBoard's pkg_resources dependency by pinning setuptools 80.9.0. All 13 loca
 checks pass. Training is running; queued evaluation requires step 3,750 / epoch
 1.0 before testing final single- and multi-turn audio-only outputs. Details and
 eventual results are in [the continuation note](response_gain_full_epoch.md).
+
+Recovered the interrupted continuation from checkpoint 1,200 / epoch 0.32.
+Verified all 504 optimizer states at step 1,200, preserved earlier logs and
+metrics, and restarted training, TensorBoard, the public tunnel and the gated
+evaluation watcher. The full-epoch target remains 3,750 total updates.

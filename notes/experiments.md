@@ -719,3 +719,8 @@ tunnel serves only this run's dashboard. Setuptools 80.9.0 restores the dependen
 needed by TensorBoard 2.20. Thirteen local checks pass. This run is ongoing, and
 post-epoch evaluation is gated on epoch 1.0 / global step 3,750. See
 [the full-epoch note](response_gain_full_epoch.md) for settings and commands.
+
+After the server/session interruption, resumed again from the complete
+checkpoint 1,200, with all 504 Adam parameter states verified at that update.
+The logging history ends at that checkpoint and was preserved. Restarted
+dashboard/tunnel and final evaluation watcher; no recipe or epoch-target change.

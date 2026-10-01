@@ -24,6 +24,17 @@ next-event loss; 20% MUSAN noise at 5–20 dB across the full input timeline;
 per-worker augmentation draws are not claimed bitwise identical to an
 uninterrupted process.
 
+The server/session interruption stopped the first continuation after checkpoint
+1,200 (epoch 0.32). All 504 saved Adam parameter states are at update 1,200;
+the maximum remains 3,750. Recovered from that checkpoint with the same
+optimizer, scheduler and Trainer/RNG state. Metrics end at exactly 1,200, so
+no logged windows needed discarding. Previous logs and dashboard metadata are
+archived under `recovery/20261001T085200Z/`; new training output appends to
+`train.log`. A TensorBoard purge marker at step 1,201 retains earlier curves
+and prevents stale future points. The dashboard, public tunnel and gated
+evaluation watcher were restarted; the temporary URL changed. Recovery details
+are saved in `resume-provenance.json`. The target remains 3,750 total updates.
+
 ## Monitoring and commands
 
 JSONL logging and TensorBoard are enabled. The first 200 pilot logging windows

@@ -1,4 +1,4 @@
-# Continue checkpoint-200 to one full 3,750-update epoch.
+# Continue the pilot to one full 3,750-update epoch; recovered at step 1,200.
 model:
   name: Qwen/Qwen2.5-Omni-3B
   revision: f75b40e3da2003cdd6e1829b1f420ca70797c34e
@@ -80,7 +80,7 @@ training:
   split_seed: 212
   window_seed: 213
   interruption_seed: 214
-  resume_from_checkpoint: outputs/instructs2s-response-gain003-pilot/checkpoint-200
+  resume_from_checkpoint: outputs/instructs2s-response-gain003-one-epoch/checkpoint-1200
   max_batch_frames: 4000
   dataloader_persistent_workers: true
   dataloader_prefetch_factor: 2
