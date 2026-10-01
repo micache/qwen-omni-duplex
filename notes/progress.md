@@ -1098,3 +1098,7 @@ two native copies used about 20 GB; increased each maximum to 64 and its frame
 budget to 120,000 for remaining MMSU/BBH samples. Preserved 216 MMSU responses
 and all completed subsets. Resume permits execution-size changes while checking
 every model/input/decoding protocol field; prior manifest and updates are saved.
+Native single-row unpadded tails now use a validated cached CUDA graph: two
+512-token reference trials match, and final cap/EOS checks match 320/166 tokens.
+The padded trial failed strict parity, so padded rows retain native generation;
+fallback preserves all 320/4 tokens. Preserve all prior valid benchmark outputs.

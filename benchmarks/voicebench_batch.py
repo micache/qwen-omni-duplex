@@ -331,6 +331,71 @@ class BatchedNative:
         self.model.eval()
         self.processor.tokenizer.padding_side = "left"
         self.head_hook = model.lm_head.register_forward_pre_hook(final_position_head)
+        for layer in model.model.layers:
+            attention = layer.self_attn
+            attention._voicebench_original_forward = attention.forward
+            attention.forward = MethodType(cached_flash_attention, attention)
+        self.tail_graph = None
+        self.use_tail_graph = True
+
+    def single_tail(self, inputs, remaining):
+        """Native continuation after one unpadded unfinished row remains.
+
+        Retain native multimodal RoPE deltas and replay the unchanged decoder
+        on its valid cached prefix. Masked native attention stays on its path.
+        """
+        original = inputs["past_key_values"]
+        padding = int((inputs["attention_mask"] == 0).sum())
+        if padding:
+            raise ValueError("Native tail graph requires an unpadded row")
+        prefix = original.get_seq_length() - padding
+        length = ((prefix + remaining + 255) // 256) * 256
+        if self.tail_graph is None or self.tail_graph[0] != length:
+            self.tail_graph = None
+            cache = Cache(layers=[PackedStaticLayer(length) for _ in self.model.model.layers])
+            token = torch.zeros(1, 1, dtype=torch.long, device=self.model.device)
+            positions = torch.zeros(3, 1, 1, dtype=torch.long, device=self.model.device)
+            mask = torch.ones(1, 1, 1, length, dtype=torch.bool, device=self.model.device)
+            def forward():
+                embeddings = self.model.get_input_embeddings()(token)
+                output = self.model.model(inputs_embeds=embeddings,
+                    attention_mask={"full_attention": mask}, position_ids=positions,
+                    past_key_values=cache, use_cache=True, return_dict=True)
+                return self.model.lm_head(output.last_hidden_state)[:, -1].argmax(-1)
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                for _ in range(3):
+                    cache.reset()
+                    forward()
+            torch.cuda.current_stream().wait_stream(stream)
+            cache.reset()
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                selected = forward()
+            self.tail_graph = (length, cache, token, positions, graph, selected)
+        _, cache, token, positions, graph, selected = self.tail_graph
+        for old, new in zip(original.layers, cache.layers):
+            new.keys[:, :, :prefix].copy_(old.keys[:, :, padding:])
+            new.values[:, :, :prefix].copy_(old.values[:, :, padding:])
+            new.cumulative_length.fill_(prefix)
+        token.copy_(inputs["input_ids"][:, -1:])
+        positions.fill_(prefix + int(self.model.rope_deltas.item()))
+        ids = []
+        eos = self.model.config.eos_token_id
+        for start in range(0, remaining, 64):
+            block = torch.empty(min(64, remaining - start), dtype=torch.long, device=self.model.device)
+            for offset in range(len(block)):
+                graph.replay()
+                block[offset].copy_(selected[0])
+                token.copy_(selected[:, None])
+                positions.add_(1)
+            decoded = block.cpu().tolist()
+            if eos in decoded:
+                ids.extend(decoded[:decoded.index(eos) + 1])
+                break
+            ids.extend(decoded)
+        return ids
 
     @torch.inference_mode()
     def generate(self, waveforms):
@@ -393,6 +458,12 @@ class BatchedNative:
                 "feature_attention_mask": inputs["feature_attention_mask"].index_select(0, selection),
                 "past_key_values": cache}
             live = [live[i] for i in keep]
+            # Masked/padded SDPA can round differently from the packed Flash
+            # kernel. Keep the original native path for those survivors.
+            if (self.use_tail_graph and len(live) == 1 and self.max_new_tokens - used >= 256
+                    and bool(inputs["attention_mask"].all())):
+                ids[live[0]].extend(self.single_tail(inputs, self.max_new_tokens - used))
+                break
         outputs = []
         eos, pad = self.model.config.eos_token_id, self.model.config.pad_token_id
         for row in ids:

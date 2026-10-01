@@ -33,6 +33,16 @@ only these execution-size fields to change on resume, keeping every model,
 dataset, context, precision and decoding-limit field fixed. OOM still retries
 smaller batches without dropping samples. Execution updates are saved per shard.
 
+Further native optimization is restricted to a single unfinished row without
+left padding: retain its native KV prefix and multimodal RoPE delta in a packed
+static-cache CUDA graph, with greedy selection and original weights. Both
+512-token unpadded trials matched native continuation exactly; the final
+320-token capped case and 166-token EOS case also match every token. A padded
+survivor failed strict parity, so that case retains ordinary native generation;
+the padded fallback test matches all 320/4 tokens. No scored outputs used the
+rejected padded fast path. `native-tail-graph-validation.json` records the
+final checks and timings. The ordinary masked native path remains authoritative.
+
 The final comparison covers IFEval 345, AdvBench 520, OpenBookQA 455,
 MMSU 3,074 across all 12 subjects, and BBH 1,000: 5,394 examples per model.
 Earlier preparation and outputs for judge-dependent subsets remain historical

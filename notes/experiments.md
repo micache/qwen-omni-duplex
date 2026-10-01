@@ -799,3 +799,9 @@ using the memory freed by EOS compaction; retained all completed subsets and
 216 MMSU answers. Initial two-copy memory use at the larger setting is about
 24.5 GB. Saved old manifest and per-shard execution changes; immutable model,
 input, precision and decoding protocol remain checked on resume.
+Tested native CUDA-graph tails using original projections, native RoPE delta,
+and greedy decoding. Two unpadded 512-token trials match exactly; the final
+320-token capped case improves 13.39 s to 5.26 s, and a 166-token EOS case
+matches (7.49 s to 3.87 s). A padded survivor failed strict token parity;
+keep ordinary native generation for every padded row. Its fallback test matches
+320/4 tokens. No scored outputs use the rejected padded fast path.
