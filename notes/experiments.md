@@ -724,3 +724,35 @@ After the server/session interruption, resumed again from the complete
 checkpoint 1,200, with all 504 Adam parameter states verified at that update.
 The logging history ends at that checkpoint and was preserved. Restarted
 dashboard/tunnel and final evaluation watcher; no recipe or epoch-target change.
+
+## 2026-10-01 — response-gain full epoch results
+
+The continuation completed successfully at update 3,750 / epoch 1.0, with all
+44,000 conversations represented once in the sampler and logging totals.
+Both training and gated evaluation exit zero. Clean 1,000-row dev text loss
+is 0.939978, lexical token accuracy 72.71%, weighted loss 0.567940. Last training
+window text/IDLE/START/STOP losses are 0.935871 / 0.019539 / 0.102034 / 0.317126.
+The complete-epoch target-weighted training loss is 0.618899; the resumed
+Trainer's printed 0.3884 is not the complete mean.
+
+All 30 fixed audio cases respond without timeouts; five of six excluded spoken
+facts are correct. Three cases have multiple response bursts and four start
+before the last question chunk is available. Long-form factual and premature
+STOP errors remain. Full supplied recordings preserve post-STOP IDLE:
+47 frames for the rectangle and 87 after the final multi-turn ATP response.
+DNA/ATP are correct; RNA is wrong continuously and in isolation.
+
+Basic native checks retain correct meaning on 12/12 questions (strict prefix
+8/12), but native controls show a real triangle-calculation regression:
+base 15, full adapter 25.5, in both transcript and audio modes. Base native
+audio also mishears the RNA clip, while both models know the text expansion.
+A targeted audit finds an incorrect geometric training reference, without a
+matching 25.5 triangle label. These results establish a large improvement over
+gain-1 training, not complete semantic correctness or unchanged intelligence.
+See [the full experiment note](response_gain_full_epoch.md).
+
+The paired 200-step native controls also answer the triangle correctly as 15
+in both modalities. The final 25.5 answer is a continuation-time regression,
+despite improved aggregate duplex accuracy. Native base/pilot/full text know
+RNA; all three native audio variants mishear this isolated clip. Preserved
+basic-check accuracy alone therefore understates skill-specific regression.

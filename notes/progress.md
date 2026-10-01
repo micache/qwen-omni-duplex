@@ -1036,3 +1036,26 @@ Recovered the interrupted continuation from checkpoint 1,200 / epoch 0.32.
 Verified all 504 optimizer states at step 1,200, preserved earlier logs and
 metrics, and restarted training, TensorBoard, the public tunnel and the gated
 evaluation watcher. The full-epoch target remains 3,750 total updates.
+
+## 2026-10-01 — response-gain full epoch completed and evaluated
+
+Completed 3,750 total updates / epoch 1.0. All 504 saved optimizer states are at
+3,750, and training logs account for all 44,000 conversations and 14,550,100
+frames without duplicate logging windows. Final adapter, logs and TensorBoard
+remain under `outputs/instructs2s-response-gain003-one-epoch/`.
+
+All 30 fixed audio-only cases produce nonempty responses without timeouts.
+Clean dev text loss is 0.939978 versus 3.996157 in the gain-1 full epoch;
+lexical token accuracy is 72.71% versus 28.01%. Five of six excluded spoken
+facts are correct; triangle area is wrong. Continuous multi-turn DNA/ATP are
+correct, RNA is wrong and also fails with a fresh cache. The twelve basic native
+text answers remain correct by meaning, but paired native triangle controls
+show a regression from base 15 to adapted 25.5 in both text and audio modes.
+Timing errors, inaccurate facts and noisy numerical training references remain.
+See [the completed experiment](response_gain_full_epoch.md) for evidence and
+all raw-output locations.
+
+Paired native controls on the 200-step pilot return the correct triangle area
+15 in both modalities, versus the full adapter's 25.5. Thus a specific numerical
+regression developed during continuation. Native base/pilot audio also mishear
+the isolated RNA clip, while native text expansion is correct in all variants.

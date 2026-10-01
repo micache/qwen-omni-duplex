@@ -37,6 +37,13 @@ fits in 6.54 GB. [The experiment note](notes/instructs2s_experiment.md) records
 the completed epoch, actual held-out outputs, and controlled audio-gain pilots.
 Longer answers alone did not yield reliable response generation.
 
+The [response-gain continuation](notes/response_gain_full_epoch.md) is now
+complete at 3,750 updates / one epoch. Gain 0.03 during responses improves clean
+dev text loss from 3.996 to 0.940 and answers five of six excluded spoken facts
+correctly. Premature START/STOP, factual mistakes and a triangle-calculation
+regression remain; the three-turn RNA answer is also incorrect. All inference
+uses raw question audio and empty text context.
+
 The implementation is in [`duplex/turn_packed.py`](duplex/turn_packed.py) (timeline/data), [`duplex/model.py`](duplex/model.py) (fusion and loss), and [`duplex/streaming.py`](duplex/streaming.py) (generation). The training recipe is [`configs/turn_packed_main.yaml`](configs/turn_packed_main.yaml); experiment details and limitations are in [`notes/experiments.md`](notes/experiments.md).
 
 The completed one-epoch run still produces malformed or repetitive held-out
