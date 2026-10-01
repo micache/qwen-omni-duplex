@@ -1059,3 +1059,16 @@ Paired native controls on the 200-step pilot return the correct triangle area
 15 in both modalities, versus the full adapter's 25.5. Thus a specific numerical
 regression developed during continuation. Native base/pilot audio also mishear
 the isolated RNA clip, while native text expansion is correct in all variants.
+
+## 2026-10-01 — full VoiceBench evaluation underway
+
+Pinned VoiceBench's inference/judge/scoring protocol; prepared all 13,313
+standard scored examples, including every SD-QA accent and MMSU subject.
+Confirmed GPT-4o access. Added resumable paired audio-only native 3B / full
+epoch empty-context duplex inference, special-token-free decoding, concurrent
+three-vote judging, and official scorer/audit tools. Fixed old runner prompt,
+forced STOP, empty-answer rejection and token-cap tail continuation. Validated
+native B=1 parity, 150-event duplex parity, cache reuse, and FlashAttention
+prefix bounds. All 18 tests pass, including Unicode JSONL and KV compaction.
+Full jobs run; final scores are pending.
+See [protocol and artifacts](voicebench_full_epoch.md).

@@ -756,3 +756,22 @@ in both modalities. The final 25.5 answer is a continuation-time regression,
 despite improved aggregate duplex accuracy. Native base/pilot/full text know
 RNA; all three native audio variants mishear this isolated clip. Preserved
 basic-check accuracy alone therefore understates skill-specific regression.
+
+## 2026-10-01 — VoiceBench full-suite comparison
+
+Evaluate the completed 3,750-step gain-0.03 checkpoint against original native
+Qwen2.5-Omni-3B on all 13,313 standard scored VoiceBench audio examples. Keep
+training's empty context / 2-second FP32 encoder duplex representation; use
+benchmark native audio chat for baseline. Greedy 2,048-token cap, up to 42
+duplex silent chunks, decoded answers without special tokens, saved original
+IDs and waveform identities. GPT-4o uses the pinned three-vote open/QA rubric;
+other metrics use official scorers with parser-failure strict-score audits.
+
+Optimization trials preserved as diagnostics: dynamic cache, masked static
+graph, then packed KV / variable-length FlashAttention with unmerged weights.
+Final B=1 event/native parity and cache reuse checks pass; identical-history
+graph/eager selected-event agreement 599/600, mean logit difference 0.022636.
+Record BF16 batching variation. Local tests: 18 passed. Unicode record reading
+and survivor-prefix KV compaction added after 3,198 completed duplex answers;
+150-event surviving-row parity passes. Full results pending.
+Protocol: [VoiceBench experiment](voicebench_full_epoch.md).

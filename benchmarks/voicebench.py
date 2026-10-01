@@ -18,7 +18,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 MODEL_ID = "Qwen/Qwen2.5-Omni-3B"
 BASE_REVISION = "f75b40e3da2003cdd6e1829b1f420ca70797c34e"
-VOICEBENCH_REVISION = "6992cf4fc51d0426c52c4805b5002e0aae49118a"
+VOICEBENCH_REVISION = "b56154172f2a57a43d29005de7d0471d748d70d1"
 DATASET_ID = "hlt-lab/voicebench"
 DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
 MANIFEST_FIELD = "run_manifest"
@@ -178,25 +178,24 @@ def _chat_ids(processor: object, system: str, prompt: str) -> object:
 
 
 class BaseQwenBackend:
-    """Official half-duplex Qwen path with Talker disabled."""
+    """Official half-duplex text path, loading only the original Thinker."""
 
     def __init__(self, settings: RunSettings) -> None:
         import torch
-        from transformers import Qwen2_5OmniForConditionalGeneration, Qwen2_5OmniProcessor
+        from transformers import Qwen2_5OmniThinkerForConditionalGeneration, Qwen2_5OmniProcessor
         common = {"revision": BASE_REVISION, "local_files_only": not settings.allow_download}
         self.torch, self.settings = torch, settings
         self.processor = Qwen2_5OmniProcessor.from_pretrained(MODEL_ID, **common)
-        self.model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
+        self.model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
             MODEL_ID, **common, torch_dtype=torch.bfloat16, device_map={"": "cuda:0"},
             attn_implementation="sdpa", low_cpu_mem_usage=True)
-        self.model.disable_talker()
         self.model.eval()
 
     def _decode(self, inputs: object) -> str:
         inputs = inputs.to(self.model.device).to(self.model.dtype)
         length = inputs.input_ids.shape[1]
         with self.torch.inference_mode():
-            ids = self.model.thinker.generate(
+            ids = self.model.generate(
                 **inputs, max_new_tokens=self.settings.max_new_tokens,
                 do_sample=False)[:, length:]
         return self.processor.batch_decode(
@@ -234,30 +233,15 @@ class DuplexQwenBackend:
     def generate_audio(self, audio: object, *, example_id: str) -> str:
         from duplex.streaming import QwenDuplexStreamer
 
-        class CappedStreamer(QwenDuplexStreamer):
-            def __init__(self, *args, lexical_cap: int, **kwargs):
-                super().__init__(*args, **kwargs)
-                self.lexical_cap = lexical_cap
-                self.lexical_count = 0
-
-            def _select_event(self, logits, state):
-                if self.lexical_count >= self.lexical_cap:
-                    selected = self.model.control_tokens.stop
-                    raw = int(logits.argmax().item())
-                    return selected, raw, raw != selected
-                selected, raw, changed = super()._select_event(logits, state)
-                controls = self.model.control_tokens
-                if selected not in {controls.idle, controls.start, controls.stop}:
-                    self.lexical_count += 1
-                return selected, raw, changed
-
         values, rate = _audio_values(audio)
-        context = _chat_ids(self.processor, self.settings.system_prompt, "")
-        context = context.tolist() if hasattr(context, "tolist") else context
-        context = context[0] if context and isinstance(context[0], list) else context
-        result = CappedStreamer(
+        context = []
+        if not getattr(self.model, "requires_empty_context", False):
+            context = _chat_ids(self.processor, self.settings.system_prompt, "")
+            context = context.tolist() if hasattr(context, "tolist") else context
+            context = context[0] if context and isinstance(context[0], list) else context
+        result = QwenDuplexStreamer(
             self.model, self.processor, max_silent_chunks=self.settings.max_silent_chunks,
-            sample=False, lexical_cap=self.settings.max_new_tokens).run(
+            sample=False, max_new_tokens=self.settings.max_new_tokens).run(
                 values, sample_id=example_id, context_token_ids=[int(x) for x in context],
                 sample_rate_hz=rate)
         token_ids = [row.event_id for row in result.trace if row.event_type == "TEXT"]
@@ -286,7 +270,7 @@ def _read_existing(path: Path, manifest: Mapping[str, Any]) -> set[str]:
     seen: set[str] = set()
     if not path.exists():
         return seen
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for number, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
         if not line.strip():
             continue
         record = json.loads(line)
@@ -329,8 +313,8 @@ def run_benchmark(
             response = (backend.generate_audio(item["audio"], example_id=example_id)
                         if settings.modality == "audio" else
                         backend.generate_text(str(item["prompt"]), example_id=example_id))
-            if not isinstance(response, str) or not response.strip():
-                raise RuntimeError(f"Model returned an empty response for {example_id}.")
+            if not isinstance(response, str):
+                raise TypeError(f"Model returned a non-string response for {example_id}.")
             record = {key: value for key, value in item.items() if key != "audio"}
             record.update(response=response, voicebench_id=example_id, run_manifest=manifest)
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -357,7 +341,7 @@ def _nested(mapping: Mapping[str, Any], path: Sequence[str]) -> Any:
 
 def _read_records(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     records, manifest = {}, None
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for number, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
         if not line.strip():
             continue
         record = json.loads(line)

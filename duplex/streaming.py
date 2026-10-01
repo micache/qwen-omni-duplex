@@ -568,6 +568,7 @@ class QwenDuplexStreamer:
         lexical_hidden_states: list[torch.Tensor] = []
         seen_stop = False
         silent_count = 0
+        token_limit_reached = False
 
         self.model.eval()
         gradient_disable = getattr(self.model, "gradient_checkpointing_disable", None)
@@ -611,6 +612,7 @@ class QwenDuplexStreamer:
                     if kind is EventKind.TEXT:
                         if len(lexical_hidden_states) >= self.max_new_tokens:
                             pending_chunks.clear()
+                            token_limit_reached = True
                             break
                         lexical_hidden_states.append(hidden)
                     audio_time = chunk.start_time_s + min(
@@ -643,6 +645,8 @@ class QwenDuplexStreamer:
                         pending_chunks.clear()
                         break
 
+                if token_limit_reached:
+                    break
                 if pending_chunks:
                     continue
                 if not chunk.silent_tail and chunk.index + 1 < len(chunks):
@@ -667,7 +671,7 @@ class QwenDuplexStreamer:
             word_spans=word_spans,
             lexical_hidden_states=lexical_hidden_states,
             timed_out=not stopped,
-            stop_reason="STOP" if stopped else "max_silent_chunks",
+            stop_reason="max_new_tokens" if token_limit_reached else "STOP" if stopped else "max_silent_chunks",
             input_duration_s=input_duration,
             processed_silent_chunks=silent_count,
         )
