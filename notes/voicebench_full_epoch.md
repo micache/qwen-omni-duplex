@@ -1,7 +1,17 @@
 # VoiceBench: original 3B versus completed duplex epoch
 
-Status: user restricted the run to offline scoring; paired inference running,
-final scores pending. GPT-4o judging has stopped and its runtime key was removed.
+Status: rerunning duplex with a corrected mandatory silence tail; final scores
+pending. Native baseline completed. GPT-4o judging stopped; runtime key removed.
+
+Authoritative output: `outputs/voicebench-response-gain003-silence/`.
+The original output folder is historical: 4,107 of 5,394 duplex traces ended at
+input EOF after an earlier STOP, without consuming appended silence. Whole-event
+decoding was correct, but that stopping policy missed the user's explicit silence
+request. Rerun every duplex sample with at least a full 2-second silent chunk,
+then continue until actual STOP or the unchanged 2,048-token/42-chunk budget.
+Scoring validates the minimum silence in raw event lengths. Reuse completed
+native outputs through a symlink; weights, source waveforms and source fields
+are unchanged. Previous comparison values are superseded, not final results.
 
 Equal-work native timing on 64 questions: one copy 14.31 s, two copies 11.86 s,
 four copies 12.00 s (including process exit, excluding model load). All fit;

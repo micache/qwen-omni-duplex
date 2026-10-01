@@ -39,7 +39,7 @@ class RandomFallback(Exception):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", type=Path, default=Path("outputs/voicebench-response-gain003"))
+    parser.add_argument("--output", type=Path, default=Path("outputs/voicebench-response-gain003-silence"))
     parser.add_argument("--data", type=Path, default=Path("data/VoiceBench-eval"))
     parser.add_argument("--upstream", type=Path, default=Path("outputs/voicebench-upstream"))
     parser.add_argument("--offline-only", action="store_true")
@@ -62,6 +62,7 @@ def main():
         if not (args.output / mode / "complete.json").exists():
             raise ValueError(f"{mode} inference is incomplete")
         model_results = {}
+        protocol = json.loads((args.output / mode / "manifest.json").read_text())
         for config in configs:
             data = []
             split_rows = {}
@@ -91,6 +92,10 @@ def main():
                             skip_special_tokens=True, clean_up_tokenization_spaces=False)
                         if whole != result["response"]:
                             raise ValueError("Scored answer differs from the whole event sequence")
+                        minimum_frames = protocol.get("min_silent_chunks", 0) * 50
+                        if (len(tokens["event_ids"]) < result["input_frames"] + minimum_frames
+                                and result["finish_reason"] != "max_new_tokens"):
+                            raise ValueError("Duplex ended without its mandatory silence tail")
                         controls = {151643, 151644, 151645}
                         lexical = [int(x) for x in tokens["event_ids"] if x not in controls]
                         if lexical != tokens["token_ids"].tolist():

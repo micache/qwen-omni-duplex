@@ -805,3 +805,13 @@ and greedy decoding. Two unpadded 512-token trials match exactly; the final
 matches (7.49 s to 3.87 s). A padded survivor failed strict token parity;
 keep ordinary native generation for every padded row. Its fallback test matches
 320/4 tokens. No scored outputs use the rejected padded fast path.
+
+Protocol correction before final reporting: 4,107 old duplex traces ended at
+question EOF after an earlier STOP, consuming zero extra silent frames. A
+correct whole-event decoder alone did not satisfy mandatory appended silence.
+Rerun all 5,394 duplex questions with minimum one 2-second silent chunk (50
+events), maximum 42 silent chunks, actual STOP and unchanged text cap/context/
+weights/encoder. Preserve the old run for audit; new authoritative folder is
+`outputs/voicebench-response-gain003-silence/`, reusing native baseline files.
+Scoring now audits this minimum-tail contract alongside paired audio and decoded
+token identity. Prior official values were provisional and are superseded.

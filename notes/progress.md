@@ -1102,3 +1102,12 @@ Native single-row unpadded tails now use a validated cached CUDA graph: two
 512-token reference trials match, and final cap/EOS checks match 320/166 tokens.
 The padded trial failed strict parity, so padded rows retain native generation;
 fallback preserves all 320/4 tokens. Preserve all prior valid benchmark outputs.
+
+Final stopping audit found 4,107/5,394 duplex traces consumed no extra silent
+chunk: a STOP during the question allowed ending exactly at input EOF. The
+whole-event decoding audit was correct but did not detect this timing policy
+problem. To honor the requested appended silence, rerun every duplex example
+with at least one complete extra 2-second zero-audio chunk; continue unfinished
+text to actual STOP or existing 2,048-token/42-chunk caps. New authoritative
+artifacts are `outputs/voicebench-response-gain003-silence/`; reuse the completed
+5,394 native responses by symlink. The previous comparison is superseded.

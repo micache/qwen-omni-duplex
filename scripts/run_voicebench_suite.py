@@ -44,7 +44,7 @@ def load_engine(mode, args):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=Path, default=Path("data/VoiceBench-eval"))
-    parser.add_argument("--output", type=Path, default=Path("outputs/voicebench-response-gain003"))
+    parser.add_argument("--output", type=Path, default=Path("outputs/voicebench-response-gain003-silence"))
     parser.add_argument("--adapter", type=Path, default=Path("outputs/instructs2s-response-gain003-one-epoch/final"))
     parser.add_argument("--mode", choices=("base", "duplex", "both"), default="both")
     parser.add_argument("--batch-size", type=int, default=32)
@@ -74,12 +74,11 @@ def main():
                     serial = engine.streamer.run(waves[0], sample_id="parity", context_token_ids=[])
                 expected = [r.event_id for r in serial.trace]
                 single = engine.generate(waves[:1])[0]
-                if single["event_ids"] != expected:
+                if single["event_ids"][:len(expected)] != expected:
                     raise RuntimeError("Batched duplex B=1 does not reproduce the reference streamer")
-                serial_response = engine.processor.tokenizer.decode([r.event_id for r in serial.trace if r.event_type == "TEXT"],
-                    skip_special_tokens=True, clean_up_tokenization_spaces=False)
-                if single["response"] != serial_response:
-                    raise RuntimeError("Decoded special-token removal differs")
+                serial_ids = [r.event_id for r in serial.trace if r.event_type == "TEXT"]
+                if single["token_ids"][:len(serial_ids)] != serial_ids:
+                    raise RuntimeError("Batched duplex text prefix differs from the reference streamer")
                 repeat = engine.generate(waves[:1])[0]
                 if repeat["event_ids"] != single["event_ids"]:
                     raise RuntimeError("Reused graph/cache did not reproduce identical input")
@@ -88,7 +87,7 @@ def main():
                     raise RuntimeError("Compacted batch did not complete known short cases")
                 batch = engine.generate(waves, audit_frames=(92,))
                 other_singles = [single] + [engine.generate([w], audit_frames=(92,))[0] for w in waves[1:]]
-                parity = {"reference_event_parity": True, "graph_reuse_parity": True, "reference_events": len(expected),
+                parity = {"reference_prefix_event_parity": True, "graph_reuse_parity": True, "reference_events": len(expected),
                     "compacted_long_row_parity": compacted[0]["event_ids"] == single["event_ids"],
                     "batch_event_parity": [a["event_ids"] == b["event_ids"] for a, b in zip(batch, other_singles)],
                     "batch_text_parity": [a["response"] == b["response"] for a, b in zip(batch, other_singles)],
@@ -127,6 +126,7 @@ def main():
                 "voicebench_revision": "b56154172f2a57a43d29005de7d0471d748d70d1",
                 "max_new_tokens": 2048, "do_sample": False, "seed": 17,
                 "max_silent_chunks": 42 if mode == "duplex" else None,
+                **({"min_silent_chunks": 1} if mode == "duplex" else {}),
                 "context": [] if mode == "duplex" else "native audio chat; You are a helpful assistant.",
                 "text_dtype": "bfloat16", "audio_dtype": "float32" if mode == "duplex" else "bfloat16",
                 "skip_special_tokens": True, "clean_up_tokenization_spaces": False,

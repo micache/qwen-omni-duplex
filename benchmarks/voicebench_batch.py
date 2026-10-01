@@ -67,11 +67,15 @@ def cached_flash_attention(self, hidden_states, attention_mask=None, position_id
 
 
 class BatchedDuplex:
-    def __init__(self, model, processor, *, max_new_tokens=2048, max_silent_chunks=42):
+    def __init__(self, model, processor, *, max_new_tokens=2048, max_silent_chunks=42,
+                 min_silent_chunks=1):
         if not getattr(model, "requires_empty_context", False):
             raise ValueError("This benchmark engine requires the empty-context checkpoint")
         self.model, self.processor = model, processor
         self.max_new_tokens, self.max_silent_chunks = max_new_tokens, max_silent_chunks
+        self.min_silent_chunks = min_silent_chunks
+        if not 0 <= min_silent_chunks <= max_silent_chunks:
+            raise ValueError("Invalid minimum silence budget")
         self.streamer = QwenDuplexStreamer(model, processor, max_new_tokens=max_new_tokens,
                                            max_silent_chunks=max_silent_chunks, sample=False)
         self.device, self.dtype = self.streamer.device, self.streamer.dtype
@@ -289,7 +293,7 @@ class BatchedDuplex:
                         active[i], seen_stop[i] = False, True
                     elif token != controls.idle:
                         lexical[i].append(token)
-                    input_finished = frame + 1 >= counts[i] * 50
+                    input_finished = frame + 1 >= (counts[i] + self.min_silent_chunks) * 50
                     in_tail = frame >= counts[i] * 50
                     boundary = (frame + 1) % 50 == 0
                     if input_finished and seen_stop[i] and not active[i] and (boundary or in_tail):
