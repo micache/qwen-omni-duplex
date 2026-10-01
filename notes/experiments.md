@@ -707,3 +707,15 @@ The checkpoint remains the 200-step response-gain pilot, trained on first turns.
 See [the detailed diagnostic](instructs2s_multiturn.md) for strings, all frame
 counts, limitations, artifact locations and commands. Default generation and
 training were not changed; runtime checks verify all supplied frames are consumed.
+
+## 2026-10-01 — full-epoch response-gain continuation launched
+
+Continued `instructs2s-response-gain003-pilot/checkpoint-200` toward 3,750 total
+updates with the exact response-only gain, data, loss, LoRA, learning rate and
+augmentation setup. Optimizer state at the first resumed checkpoint verifies
+step 250 rather than a restart. The sampler covers 44,000 unique rows once.
+TensorBoard and JSONL include the pilot's earlier logging windows; a public HTTPS
+tunnel serves only this run's dashboard. Setuptools 80.9.0 restores the dependency
+needed by TensorBoard 2.20. Thirteen local checks pass. This run is ongoing, and
+post-epoch evaluation is gated on epoch 1.0 / global step 3,750. See
+[the full-epoch note](response_gain_full_epoch.md) for settings and commands.

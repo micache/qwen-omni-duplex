@@ -1018,3 +1018,16 @@ IDLE between/after responses. DNA is truncated, RNA is wrong, ATP is correct.
 RNA also fails in isolation; ATP succeeds. This is a first-turn-trained 200-step
 checkpoint, not validated multi-turn training. See
 [the diagnostic note](instructs2s_multiturn.md) for actual strings and raw traces.
+
+## 2026-10-01 — response-gain pilot continued to one epoch
+
+The user required a completed full epoch before judging the response-gain setup.
+Resumed the step-200 checkpoint with optimizer/scheduler/RNG state toward 3,750
+total updates and one visit per 44,000 examples. Numerical settings, dataset,
+noise and synthetic interruption probabilities are unchanged. Added a full-epoch
+recipe with JSONL/TensorBoard logging, seeded the first 200 logging windows, and
+exposed the dashboard through a verified public HTTPS Cloudflare tunnel. Fixed
+TensorBoard's pkg_resources dependency by pinning setuptools 80.9.0. All 13 local
+checks pass. Training is running; queued evaluation requires step 3,750 / epoch
+1.0 before testing final single- and multi-turn audio-only outputs. Details and
+eventual results are in [the continuation note](response_gain_full_epoch.md).

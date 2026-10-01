@@ -16,3 +16,5 @@ soundfile==0.14.0
 scipy==1.17.1
 pytest==9.1.1
 tensorboard==2.20.0
+# TensorBoard 2.20 imports pkg_resources, removed in setuptools 82.
+setuptools==80.9.0
