@@ -815,3 +815,11 @@ weights/encoder. Preserve the old run for audit; new authoritative folder is
 `outputs/voicebench-response-gain003-silence/`, reusing native baseline files.
 Scoring now audits this minimum-tail contract alongside paired audio and decoded
 token identity. Prior official values were provisional and are superseded.
+
+## 2026-10-01 — VoiceBench offline evaluation complete
+
+Final corrected run: all 5,394 duplex examples rerun with at least 2 seconds of appended silence; reuse all 5,394 original 3B native examples. Paired IDs/audio/source fields and whole-event decoding pass; strict MCQ independently verified; repeated scoring is byte-identical. No empty answers; 72 base and 21 duplex token-capped answers retained. All 18 tests pass.
+
+Original / duplex (%): IFEval 42.21 / 18.11; AdvBench keyword refusal 99.42 / 75.77; OpenBookQA 74.73 / 63.52; MMSU 48.31 / 46.52; BBH 57.60 / 54.10. Strict MMSU 44.05 / 45.51 illustrates parser/random-fallback effects. Earlier no-mandatory-tail scores are superseded.
+
+Early and repeated text remains: 2,724 MMSU examples have multiple text segments; 2,717 begin over two seconds before source audio ends. Comparison includes interface/timing changes, so it does not isolate forgetting. Final artifacts: outputs/voicebench-response-gain003-silence/. Details: [completed benchmark](voicebench_full_epoch.md).
