@@ -1006,3 +1006,15 @@ epoch retains none under that format. This supports testing response-only gain
 with checkpoint retention gates, not claiming a solved or fully trained model.
 The response-state gain is causal and shared by training and streaming; reload
 rejects incompatible audio preparation/gain and generation rejects text context.
+
+## 2026-10-01 — post-STOP and multi-turn inference
+
+The single-turn CLI stops at STOP in its appended silence; a full provided
+10-second rectangle timeline instead predicts 26 IDLE frames after that STOP.
+The original 224-event prefix matches exactly. Ran a genuine excluded three-turn
+InstructS2S conversation with one retained cache, only question audio, and fixed
+four-second silence intervals: 500 events, three START/STOP pairs, and predicted
+IDLE between/after responses. DNA is truncated, RNA is wrong, ATP is correct.
+RNA also fails in isolation; ATP succeeds. This is a first-turn-trained 200-step
+checkpoint, not validated multi-turn training. See
+[the diagnostic note](instructs2s_multiturn.md) for actual strings and raw traces.

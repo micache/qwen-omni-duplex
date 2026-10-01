@@ -692,3 +692,18 @@ full-epoch results. Their actual outputs live in each pilot's `evaluation/`.
 All three early adapters preserve 12 simple native-text answers by meaning;
 the full original adapter answers none of them correctly. Further training with
 response-only gain needs retention and completion gates before acceptance.
+
+## 2026-10-01 — complete timelines and continuous conversation
+
+Added a concrete inference-only diagnostic for post-STOP padding and a genuine
+three-turn `instruct_en_20` recording, excluded by conversation ID from train/dev.
+The rectangle's full 250-frame waveform gives the exact prior 224-event prefix
+plus 26 predicted IDLE frames. Continuous DNA/RNA/ATP audio with four-second
+silent gaps gives 500 events: 454 IDLE, three START, 40 TEXT, three STOP, with
+zero grammar-mask changes. Outputs are respectively truncated, incorrect and
+correct. Isolated RNA also fails, so conversation history is not the sole cause.
+Only user recordings are provided, without textual history or reference answers.
+The checkpoint remains the 200-step response-gain pilot, trained on first turns.
+See [the detailed diagnostic](instructs2s_multiturn.md) for strings, all frame
+counts, limitations, artifact locations and commands. Default generation and
+training were not changed; runtime checks verify all supplied frames are consumed.
