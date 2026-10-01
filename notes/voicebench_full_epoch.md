@@ -12,6 +12,21 @@ production retains 2,048 tokens, batch maximum 32 per native copy and a 60,000
 frame budget per copy, halving on OOM. Duplex remains one model, batch maximum
 128 and 300,000 frames. Details: `concurrency/results.json` in the output folder.
 
+Native IFEval exposed an additional bottleneck: one long response kept every
+completed row decoding pads for the full 2,048-token limit (about 188 s per
+26-row batch with two copies). Native generation now continues in 64-token
+blocks, retaining full token prefixes for generation processors and selecting
+unfinished rows in the native dynamic KV cache and multimodal RoPE deltas.
+It still calls the original Thinker `generate`; B=1 continuation matches all
+256 native reference tokens across four block boundaries. A mixed four-row
+case verifies EOS completion and continued long answers. Completed ordinary
+native outputs are retained; model/input/decoding protocol is identical.
+All 26 rows in a production-shaped validation preserve their initial 64-token
+prefixes exactly; generation after row removal can differ at BF16 near-ties,
+as with ordinary changes in batch size. The compacted single-copy trial took
+87.42 s; its 188.2 s ordinary reference ran alongside a second copy, so these
+times are not a controlled speedup ratio. Validation artifacts record both.
+
 The final comparison covers IFEval 345, AdvBench 520, OpenBookQA 455,
 MMSU 3,074 across all 12 subjects, and BBH 1,000: 5,394 examples per model.
 Earlier preparation and outputs for judge-dependent subsets remain historical

@@ -17,10 +17,14 @@ def main():
         time.sleep(5)
     copies = json.loads(profile.read_text())["selected_copies"]
     print(f"Using {copies} native model copies after timing comparison", flush=True)
-    with (OUTPUT / "offline-duplex.log").open("a") as log:
-        subprocess.run([PYTHON, "-u", "scripts/run_voicebench_suite.py", "--offline-only",
-            "--mode", "duplex", "--batch-size", "128", "--frame-budget", "300000"],
-            cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
+    completed_duplex = OUTPUT / "duplex/complete.json"
+    required = {"ifeval", "advbench", "openbookqa", "mmsu", "bbh"}
+    if not completed_duplex.exists() or not required.issubset(
+            json.loads(completed_duplex.read_text()).get("configs", [])):
+        with (OUTPUT / "offline-duplex.log").open("a") as log:
+            subprocess.run([PYTHON, "-u", "scripts/run_voicebench_suite.py", "--offline-only",
+                "--mode", "duplex", "--batch-size", "128", "--frame-budget", "300000"],
+                cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
     processes, logs = [], []
     for rank in range(copies):
         log = (OUTPUT / f"offline-base-{rank}.log").open("a")

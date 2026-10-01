@@ -786,3 +786,10 @@ examples; rerunning these is unnecessary because actual decoded strings match.
 Compare 1/2/4 independent native model copies on the same 64 audio questions
 (64-token diagnostic budget, excluded from scores), then select concurrency
 only when timing improves at least 10%. Production retains the 2,048-token cap.
+
+Select two native model copies: one/two/four-copy diagnostics took
+14.31/11.86/12.00 s respectively. Finished native rows are subsequently removed
+between 64-token blocks, keeping full generated prefixes, native cache and
+RoPE deltas. Native B=1 256-token continuation parity and 26-row initial
+64-token parity pass. This changes execution batch sizes, not the evaluation
+input or response limit; retain the 102 completed pre-compaction native answers.

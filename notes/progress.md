@@ -1085,3 +1085,10 @@ special tokens skipped exactly matches the saved answer. Keep those outputs;
 finish remaining samples with explicit whole-event decoding and silence tails.
 Independent native-model concurrency is timed with 1/2/4 copies before selecting
 production parallelism; sharded outputs retain source IDs and token sidecars.
+
+All 5,394 duplex outputs are complete and pass whole-event decoding/full-input
+consumption audits: 5,375 STOP, 19 token-cap, no empty answers. Native timing
+selected two copies. Long IFEval answers exposed padded finished-row work in
+native generation; added 64-token continuation with native KV/RoPE row selection.
+B=1 matches all 256 reference tokens; all 26 production-shaped rows match their
+initial 64-token prefixes. Preserve 102 earlier valid native outputs and resume.

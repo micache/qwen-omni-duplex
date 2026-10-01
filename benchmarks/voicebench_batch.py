@@ -360,9 +360,39 @@ class BatchedNative:
                 (0, mel_length - item.feature_attention_mask.shape[1])))
         inputs = {"input_ids": torch.cat(token_rows), "inputs_embeds": torch.cat(embed_rows),
                   "attention_mask": torch.cat(mask_rows), "feature_attention_mask": torch.cat(feature_masks)}
-        generated = self.model.generate(**inputs, do_sample=False, use_cache=True,
-                                        max_new_tokens=self.max_new_tokens)[:, length:]
-        ids = generated.cpu().tolist()
+        # Native generate pads finished rows until its longest answer ends.
+        # Continue in blocks and remove completed rows with their cache entries.
+        # Full token prefixes are retained for native generation processors.
+        live = list(range(len(waveforms)))
+        ids = [[] for _ in waveforms]
+        used = 0
+        while live and used < self.max_new_tokens:
+            prefix_length = inputs["input_ids"].shape[1]
+            output = self.model.generate(**inputs, do_sample=False, use_cache=True,
+                max_new_tokens=min(64, self.max_new_tokens - used), return_dict_in_generate=True)
+            new = output.sequences[:, prefix_length:]
+            blocks = new.cpu().tolist()
+            eos = self.model.config.eos_token_id
+            keep = []
+            for local, row in enumerate(blocks):
+                if eos in row:
+                    ids[live[local]].extend(row[:row.index(eos) + 1])
+                else:
+                    ids[live[local]].extend(row)
+                    keep.append(local)
+            used += new.shape[1]
+            if not keep or used >= self.max_new_tokens:
+                break
+            selection = torch.tensor(keep, device=self.model.device)
+            cache = output.past_key_values
+            cache.batch_select_indices(selection)
+            self.model.rope_deltas = self.model.rope_deltas.index_select(0, selection)
+            inputs = {"input_ids": output.sequences.index_select(0, selection),
+                "attention_mask": torch.cat([inputs["attention_mask"],
+                    torch.ones_like(new)], dim=1).index_select(0, selection),
+                "feature_attention_mask": inputs["feature_attention_mask"].index_select(0, selection),
+                "past_key_values": cache}
+            live = [live[i] for i in keep]
         outputs = []
         eos, pad = self.model.config.eos_token_id, self.model.config.pad_token_id
         for row in ids:
