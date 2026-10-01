@@ -136,8 +136,18 @@ def main():
             model_folder = args.output / mode
             model_folder.mkdir(exist_ok=True)
             manifest_path = model_folder / "manifest.json"
-            if manifest_path.exists() and json.loads(manifest_path.read_text()) != manifest:
-                raise ValueError("Cannot resume a run with changed model/protocol settings")
+            if manifest_path.exists():
+                previous = json.loads(manifest_path.read_text())
+                runtime = {"batch_size_max", "kv_frame_budget"}
+                if {k: v for k, v in previous.items() if k not in runtime} != {
+                        k: v for k, v in manifest.items() if k not in runtime}:
+                    raise ValueError("Cannot resume a run with changed model/protocol settings")
+                if previous != manifest:
+                    (model_folder / f"execution-update-{args.shard_index}.json").write_text(json.dumps({
+                        "previous_batch_size_max": previous["batch_size_max"],
+                        "previous_kv_frame_budget": previous["kv_frame_budget"],
+                        "batch_size_max": args.batch_size, "kv_frame_budget": args.frame_budget,
+                        "protocol_changed": False}, indent=2))
             # Separate model processes may reach this file together. Publish
             # complete JSON atomically so another worker cannot read a truncation.
             temporary = model_folder / f"manifest-{args.shard_index}.tmp"

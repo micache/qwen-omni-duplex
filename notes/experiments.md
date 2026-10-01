@@ -792,4 +792,10 @@ Select two native model copies: one/two/four-copy diagnostics took
 between 64-token blocks, keeping full generated prefixes, native cache and
 RoPE deltas. Native B=1 256-token continuation parity and 26-row initial
 64-token parity pass. This changes execution batch sizes, not the evaluation
-input or response limit; retain the 102 completed pre-compaction native answers.
+input or response limit; logs confirm 152 completed pre-compaction native answers
+were retained (an earlier status read observed only the first 102).
+Later increased each native copy to maximum batch 64 / 120,000-frame budget
+using the memory freed by EOS compaction; retained all completed subsets and
+216 MMSU answers. Initial two-copy memory use at the larger setting is about
+24.5 GB. Saved old manifest and per-shard execution changes; immutable model,
+input, precision and decoding protocol remain checked on resume.

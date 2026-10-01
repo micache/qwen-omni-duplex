@@ -26,6 +26,12 @@ prefixes exactly; generation after row removal can differ at BF16 near-ties,
 as with ordinary changes in batch size. The compacted single-copy trial took
 87.42 s; its 188.2 s ordinary reference ran alongside a second copy, so these
 times are not a controlled speedup ratio. Validation artifacts record both.
+After completed-row compaction lowered memory use to about 20 GB for both
+copies, raised each native maximum to 64 and its KV budget to 120,000 frames
+for the remaining samples. Retain outputs and prior manifest; the runner permits
+only these execution-size fields to change on resume, keeping every model,
+dataset, context, precision and decoding-limit field fixed. OOM still retries
+smaller batches without dropping samples. Execution updates are saved per shard.
 
 The final comparison covers IFEval 345, AdvBench 520, OpenBookQA 455,
 MMSU 3,074 across all 12 subjects, and BBH 1,000: 5,394 examples per model.

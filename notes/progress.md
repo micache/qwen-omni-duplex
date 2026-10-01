@@ -1091,4 +1091,10 @@ consumption audits: 5,375 STOP, 19 token-cap, no empty answers. Native timing
 selected two copies. Long IFEval answers exposed padded finished-row work in
 native generation; added 64-token continuation with native KV/RoPE row selection.
 B=1 matches all 256 reference tokens; all 26 production-shaped rows match their
-initial 64-token prefixes. Preserve 102 earlier valid native outputs and resume.
+initial 64-token prefixes. Logs confirm 152 earlier valid native outputs were
+saved before the execution update; preserve them and resume.
+IFEval, AdvBench and OpenBookQA are complete for both models. After compaction,
+two native copies used about 20 GB; increased each maximum to 64 and its frame
+budget to 120,000 for remaining MMSU/BBH samples. Preserved 216 MMSU responses
+and all completed subsets. Resume permits execution-size changes while checking
+every model/input/decoding protocol field; prior manifest and updates are saved.

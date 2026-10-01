@@ -30,8 +30,8 @@ def main():
         log = (OUTPUT / f"offline-base-{rank}.log").open("a")
         logs.append(log)
         processes.append(subprocess.Popen([PYTHON, "-u", "scripts/run_voicebench_suite.py",
-            "--offline-only", "--mode", "base", "--batch-size", str(64 // copies),
-            "--frame-budget", str(120000 // copies), "--cpu-threads", str(min(4, 12 // copies)),
+            "--offline-only", "--mode", "base", "--batch-size", str(128 // copies),
+            "--frame-budget", str(240000 // copies), "--cpu-threads", str(min(4, 12 // copies)),
             "--num-shards", str(copies), "--shard-index", str(rank)],
             cwd=ROOT, stdout=log, stderr=subprocess.STDOUT))
     codes = [p.wait() for p in processes]
