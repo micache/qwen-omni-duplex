@@ -12,6 +12,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -39,16 +40,35 @@ def main():
     parser.add_argument("--upstream", type=Path, default=Path("outputs/voicebench-upstream"))
     parser.add_argument("--key-file", type=Path, default=Path("/tmp/qwen-voicebench-openai-key"))
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--max-judge-tokens", type=int, default=16)
+    parser.add_argument("--tokens-per-minute", type=int, default=27000)
     args = parser.parse_args()
     if args.key_file.stat().st_mode & 0o077:
         raise PermissionError("The runtime key file must be owner-only")
     key = args.key_file.read_text().strip()
     rubrics = rubric_constants(args.upstream / "api_judge.py")
     (args.output / "judge-protocol.json").write_text(json.dumps({"requested_model": "gpt-4o",
-        "temperature": 0.5, "top_p": 0.95, "n": 3, "max_tokens": 1024,
+        "temperature": 0.5, "top_p": 0.95, "n": 3, "max_tokens": args.max_judge_tokens,
+        "upstream_max_tokens": 1024, "tokens_per_minute_target": args.tokens_per_minute,
         "rubric_sha256": hashlib.sha256(json.dumps(rubrics, sort_keys=True).encode()).hexdigest(),
         "upstream_revision": "b56154172f2a57a43d29005de7d0471d748d70d1",
         "system": "You are a helpful assistant who tries to help answer the user's question."}, indent=2))
+    rate_lock, error_lock = threading.Lock(), threading.Lock()
+    next_request = time.monotonic()
+
+    def pace(messages):
+        nonlocal next_request
+        # Conservative byte estimate, plus all three one-word completions.
+        estimated = len(json.dumps(messages, ensure_ascii=False).encode()) / 3 + 3 * args.max_judge_tokens
+        with rate_lock:
+            scheduled = max(time.monotonic(), next_request)
+            next_request = scheduled + estimated * 60 / args.tokens_per_minute
+        time.sleep(max(0, scheduled - time.monotonic()))
+
+    def error_log(item, attempt, status):
+        with error_lock, (args.output / "judge-errors.jsonl").open("a") as handle:
+            handle.write(json.dumps({"voicebench_id": item["voicebench_id"], "attempt": attempt,
+                                    **status}) + "\n")
 
     def request(item):
         qa = "reference" in item
@@ -59,10 +79,11 @@ def main():
         prompt = prompt.replace("{response}", item["response"])
         payload = {"model": "gpt-4o", "messages": [
             {"role": "system", "content": "You are a helpful assistant who tries to help answer the user's question."},
-            {"role": "user", "content": prompt}], "max_tokens": 1024, "frequency_penalty": 0,
+            {"role": "user", "content": prompt}], "max_tokens": args.max_judge_tokens, "frequency_penalty": 0,
             "presence_penalty": 0, "stop": None, "temperature": 0.5, "top_p": 0.95, "n": 3}
         for attempt in range(10):
             try:
+                pace(payload["messages"])
                 call = urllib.request.Request("https://api.openai.com/v1/chat/completions",
                     data=json.dumps(payload).encode(), headers={"Authorization": "Bearer " + key,
                     "Content-Type": "application/json"})
@@ -73,7 +94,9 @@ def main():
                 if len(scores) != 3:
                     raise ValueError("Incorrect number of judge votes")
                 if qa:
-                    valid = all(s.lower() in {"yes", "no"} for s in scores)
+                    # Upstream retains raw QA votes, including punctuation or
+                    # explanations; its literal majority scorer handles them.
+                    valid = all(bool(s) for s in scores)
                 else:
                     def rating(s):
                         try:
@@ -85,19 +108,21 @@ def main():
                 if not valid:
                     raise ValueError("Invalid judge vote format")
                 return {**item, "score": scores, "judge_model": body["model"],
-                    "judge_usage": body["usage"], "judge_request_id": request_id}
+                    "judge_usage": body["usage"], "judge_request_id": request_id,
+                    "judge_max_tokens": args.max_judge_tokens}
             except urllib.error.HTTPError as error:
                 try:
                     code = json.loads(error.read())["error"].get("code")
                 except Exception:
                     code = "unavailable"
+                error_log(item, attempt, {"http_status": error.code, "error_code": code})
                 # Deliberately exclude server message text and headers from errors/logs.
                 if error.code in {401, 403} or code in {"insufficient_quota", "invalid_api_key"}:
                     return {"judge_unavailable": True, "http_status": error.code, "error_code": code}
                 if error.code not in {429, 500, 502, 503, 504}:
                     return {"judge_failed": True, "http_status": error.code, "error_code": code}
-            except (urllib.error.URLError, TimeoutError, ValueError, KeyError):
-                pass
+            except (urllib.error.URLError, TimeoutError, ValueError, KeyError) as error:
+                error_log(item, attempt, {"error_type": type(error).__name__})
             time.sleep(min(2 ** attempt, 30))
         return {"judge_failed": True, "error_code": "retry_limit"}
 
@@ -129,15 +154,19 @@ def main():
             # Keep the request queue bounded while inference continues producing answers.
             for start in range(0, len(pending), 64):
                 futures = {pool.submit(request, item): target for target, item in pending[start:start + 64]}
+                failure = None
                 for future in as_completed(futures):
                     result = future.result()
                     if result.get("judge_unavailable") or result.get("judge_failed"):
                         (args.output / "judge-status.json").write_text(json.dumps(result))
                         print(json.dumps(result), flush=True)
-                        return
+                        failure = result
+                        continue
                     with futures[future].open("a") as handle:
                         handle.write(json.dumps(result, ensure_ascii=False) + "\n")
                     count += 1
+                if failure:
+                    return
                 print(f"judged {count} new answers", flush=True)
                 (args.output / "judge-status.json").write_text(json.dumps({"available": True, "new_answers": count}))
     (args.output / "judge-complete.json").write_text(json.dumps({"new_answers": count, "model": "gpt-4o"}))

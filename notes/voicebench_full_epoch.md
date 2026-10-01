@@ -1,6 +1,30 @@
 # VoiceBench: original 3B versus completed duplex epoch
 
-Status: full paired inference and GPT-4o judging running; final scores pending.
+Status: user restricted the run to offline scoring; paired inference running,
+final scores pending. GPT-4o judging has stopped and its runtime key was removed.
+
+Equal-work native timing on 64 questions: one copy 14.31 s, two copies 11.86 s,
+four copies 12.00 s (including process exit, excluding model load). All fit;
+four occupied about 38.5 GB during the trial without beating two. Select two
+independent native processes, source-index-modulo sharding, separately flushed
+files and token sidecars. The diagnostic 64-token cap is never used in scoring;
+production retains 2,048 tokens, batch maximum 32 per native copy and a 60,000
+frame budget per copy, halving on OOM. Duplex remains one model, batch maximum
+128 and 300,000 frames. Details: `concurrency/results.json` in the output folder.
+
+The final comparison covers IFEval 345, AdvBench 520, OpenBookQA 455,
+MMSU 3,074 across all 12 subjects, and BBH 1,000: 5,394 examples per model.
+Earlier preparation and outputs for judge-dependent subsets remain historical
+artifacts and are excluded from the final comparison. The judge section below
+records the earlier, superseded protocol.
+
+All 2,958 offline duplex answers saved before this scope change passed a
+whole-event decode audit: decoding every generated frame event with special
+tokens skipped yields exactly the saved response. Continued inference explicitly
+decodes this full event sequence. Every input chunk is consumed; additional
+zero-audio chunks provide time for autoregressive text, ending on actual STOP
+or the documented token/silence cap. No text question or generation prompt is
+injected into the duplex path.
 
 ## Fixed protocol
 
@@ -37,7 +61,13 @@ Status: full paired inference and GPT-4o judging running; final scores pending.
 GPT-4o access works (resolved `gpt-4o-2024-08-06`). Credential confined to an
 owner-only temporary runtime file; excluded from code, logs, artifacts and git.
 Use pinned `api_judge.py` rubrics/system with temperature 0.5, top_p 0.95, n=3,
-maximum 1,024 judge tokens, zero penalties. Only replace upstream's GPT-4o-mini
+zero penalties. Initial 1,024-token judging reached retry limits after 1,474
+saved grades. A successful key/rate probe confirms 500 RPM / 30,000 TPM.
+Resume with 16 judge output tokens (single-number/Yes/No answers) and paced
+requests targeting 27,000 TPM, following OpenAI's
+[rate guidance](https://developers.openai.com/api/docs/guides/rate-limits).
+Retain all valid earlier votes; record the output budget on new votes and
+the rate probe/protocol. Only replace upstream's GPT-4o-mini
 with requested GPT-4o. Open subsets average three 1–5 ratings; SD-QA uses
 majority Yes/No accuracy. Optional PEDANT/PANDA is outside this GPT metric.
 Every vote, returned model, usage and request ID is recorded.
@@ -82,7 +112,18 @@ newline-terminated records. Local tests: 18 passed.
 
 ## Reproduce and artifacts
 
-Use `.venv/bin/python`. Clone the pinned upstream into
+Use `.venv/bin/python`. The final offline run uses:
+
+```bash
+.venv/bin/python scripts/benchmark_voicebench_concurrency.py
+.venv/bin/python scripts/run_voicebench_offline.py
+.venv/bin/python scripts/score_voicebench_suite.py --offline-only
+```
+
+The launcher resumes duplex, runs the selected native shards, validates their
+completion, and invokes official offline scoring. Per-worker logs and original
+NPZ tokens remain in `outputs/voicebench-response-gain003/`. Earlier full-suite
+commands below describe the superseded scope. Clone the pinned upstream into
 `outputs/voicebench-upstream`; preserve HF metadata in the run directory.
 
 ```bash

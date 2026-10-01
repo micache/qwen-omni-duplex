@@ -312,7 +312,7 @@ class BatchedDuplex:
                     previous = previous.index_select(0, survivor_indices)
                     live_ids = [live_ids[j] for j in keep]
                     del old_step
-            return [{"response": self.processor.tokenizer.decode(ids, skip_special_tokens=True,
+            return [{"response": self.processor.tokenizer.decode(evt, skip_special_tokens=True,
                       clean_up_tokenization_spaces=False), "token_ids": ids, "event_ids": evt,
                      "raw_event_ids": raw, "finish_reason": reason,
                      "grammar_overrides": sum(a != b for a, b in zip(evt, raw)),

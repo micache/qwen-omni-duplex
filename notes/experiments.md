@@ -774,4 +774,15 @@ graph/eager selected-event agreement 599/600, mean logit difference 0.022636.
 Record BF16 batching variation. Local tests: 18 passed. Unicode record reading
 and survivor-prefix KV compaction added after 3,198 completed duplex answers;
 150-event surviving-row parity passes. Full results pending.
+GPT-4o rate probe confirms 30,000 TPM; judging resumed after 1,474 grades with
+16-token output cap and paced 27,000-TPM target. Valid single-number/Yes/No
+votes retain the benchmark rubrics, temperature/top_p and three-vote protocol.
 Protocol: [VoiceBench experiment](voicebench_full_epoch.md).
+
+Latest requested scope is offline evaluation only: 5,394 examples per model,
+no further GPT-4o calls. Paid judging stopped and the temporary key was removed.
+Whole-sequence decoding audit passed on all 2,958 completed offline duplex
+examples; rerunning these is unnecessary because actual decoded strings match.
+Compare 1/2/4 independent native model copies on the same 64 audio questions
+(64-token diagnostic budget, excluded from scores), then select concurrency
+only when timing improves at least 10%. Production retains the 2,048-token cap.

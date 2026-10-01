@@ -16,7 +16,7 @@ from types import ModuleType
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
 from transformers import Qwen2_5OmniProcessor
-from prepare_voicebench import CONFIGS
+from prepare_voicebench import CONFIGS, OFFLINE_CONFIGS
 
 
 def read(path):
@@ -42,7 +42,9 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("outputs/voicebench-response-gain003"))
     parser.add_argument("--data", type=Path, default=Path("data/VoiceBench-eval"))
     parser.add_argument("--upstream", type=Path, default=Path("outputs/voicebench-upstream"))
+    parser.add_argument("--offline-only", action="store_true")
     args = parser.parse_args()
+    configs = OFFLINE_CONFIGS if args.offline_only else CONFIGS
     import nltk
     nltk.data.path.insert(0, str((args.output / "nltk_data").resolve()))
     from langdetect import DetectorFactory
@@ -60,7 +62,7 @@ def main():
         if not (args.output / mode / "complete.json").exists():
             raise ValueError(f"{mode} inference is incomplete")
         model_results = {}
-        for config in CONFIGS:
+        for config in configs:
             data = []
             split_rows = {}
             for folder in sorted((args.data / config).iterdir()):
@@ -68,7 +70,7 @@ def main():
                     continue
                 split = folder.name
                 source = read(folder / "manifest.jsonl")
-                records = read(args.output / mode / f"{config}--{split}.jsonl")
+                records = [r for p in sorted((args.output / mode).glob(f"{config}--{split}*.jsonl")) for r in read(p)]
                 records.sort(key=lambda r: int(r["voicebench_id"].rsplit(":", 1)[1]))
                 if len(records) != len(source) or len(records) != expected[config, split]:
                     raise ValueError(f"Incorrect sample count for {mode} {config}/{split}")
@@ -85,6 +87,10 @@ def main():
                     if decoded != result["response"]:
                         raise ValueError("Scored answer differs from actual generated tokens")
                     if mode == "duplex":
+                        whole = processor.tokenizer.decode(tokens["event_ids"].tolist(),
+                            skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                        if whole != result["response"]:
+                            raise ValueError("Scored answer differs from the whole event sequence")
                         controls = {151643, 151644, 151645}
                         lexical = [int(x) for x in tokens["event_ids"] if x not in controls]
                         if lexical != tokens["token_ids"].tolist():
@@ -116,9 +122,15 @@ def main():
                 result["judged"] = len(judged)
                 if len(judged) == len(data):
                     if config == "sd-qa":
-                        correct = [sum(s.lower() == "yes" for s in r["score"]) >= 2 for r in judged]
+                        def majority(scores):
+                            scores = [s.lower() for s in scores]
+                            return max(set(scores), key=scores.count) == "yes"
+                        correct = [majority(r["score"]) for r in judged]
                         result["score"] = float(np.mean(correct) * 100)
                         result["metric"] = "GPT-4o majority-vote accuracy (%)"
+                        normalized = [sum(s.strip().strip(".*` ").lower() == "yes" for s in r["score"]) >= 2 for r in judged]
+                        result["normalized_vote_accuracy"] = float(np.mean(normalized) * 100)
+                        result["noncanonical_votes"] = sum(s.lower() not in {"yes", "no"} for r in judged for s in r["score"])
                     else:
                         result["score"] = float(official["open"].OpenEvaluator().evaluate(judged)["gpt"])
                         result["metric"] = "GPT-4o rating (1–5)"
@@ -168,7 +180,7 @@ def main():
     report["paired_samples"] = len(paired_ids)
     (args.output / "scores.json").write_text(json.dumps(report, indent=2, ensure_ascii=False))
     lines = ["| Benchmark | Samples | Original 3B | Full-epoch duplex | Difference |", "|---|---:|---:|---:|---:|"]
-    for config in CONFIGS:
+    for config in configs:
         base, duplex = (report["models"][m][config] for m in ("base", "duplex"))
         a, b = base["score"], duplex["score"]
         lines.append(f"| {config} | {base['n']} | {a:.2f} | {b:.2f} | {b-a:+.2f} |" if a is not None and b is not None

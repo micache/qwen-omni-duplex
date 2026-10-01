@@ -1071,4 +1071,17 @@ forced STOP, empty-answer rejection and token-cap tail continuation. Validated
 native B=1 parity, 150-event duplex parity, cache reuse, and FlashAttention
 prefix bounds. All 18 tests pass, including Unicode JSONL and KV compaction.
 Full jobs run; final scores are pending.
+Judge retry limits at 1,474 saved answers prompted a key/rate check: key valid,
+500 RPM / 30,000 TPM. Resumed with paced calls and 16-token judge outputs,
+preserving all rubric settings/votes and the requested GPT-4o model.
 See [protocol and artifacts](voicebench_full_epoch.md).
+
+The user subsequently restricted evaluation to the five offline metrics:
+IFEval, AdvBench, OpenBookQA, all MMSU subjects, and BBH (5,394 paired samples).
+Stopped paid judging and removed the runtime credential. The initial judge
+retry failures included noncanonical QA vote formatting, not an invalid key.
+Audited all 2,958 saved offline duplex responses: decoding every event with
+special tokens skipped exactly matches the saved answer. Keep those outputs;
+finish remaining samples with explicit whole-event decoding and silence tails.
+Independent native-model concurrency is timed with 1/2/4 copies before selecting
+production parallelism; sharded outputs retain source IDs and token sidecars.

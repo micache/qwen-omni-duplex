@@ -17,6 +17,7 @@ import soundfile as sf
 
 CONFIGS = ("commoneval", "alpacaeval_full", "wildvoice", "sd-qa", "ifeval",
            "advbench", "openbookqa", "mmsu", "bbh")
+OFFLINE_CONFIGS = ("ifeval", "advbench", "openbookqa", "mmsu", "bbh")
 REVISION = "de69a22f41561676635bef0b31681df4b866ec07"
 
 

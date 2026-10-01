@@ -18,7 +18,7 @@ import torch
 from benchmarks.voicebench import BaseQwenBackend, RunSettings, _adapter_identity
 from benchmarks.voicebench_batch import BatchedDuplex, BatchedNative
 from duplex.training import _load_adapter_weights, build_training_model, load_training_config, seed_everything
-from prepare_voicebench import CONFIGS, REVISION
+from prepare_voicebench import CONFIGS, OFFLINE_CONFIGS, REVISION
 
 
 def read_audio(record):
@@ -50,9 +50,16 @@ def main():
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--frame-budget", type=int, default=100000)
     parser.add_argument("--preflight", action="store_true")
+    parser.add_argument("--offline-only", action="store_true")
+    parser.add_argument("--num-shards", type=int, default=1)
+    parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument("--cpu-threads", type=int, default=4)
     args = parser.parse_args()
+    if not 0 <= args.shard_index < args.num_shards:
+        parser.error("shard-index must be in [0, num-shards)")
+    configs = OFFLINE_CONFIGS if args.offline_only else CONFIGS
     args.output.mkdir(parents=True, exist_ok=True)
-    torch.set_num_threads(4)
+    torch.set_num_threads(args.cpu_threads)
     seed_everything(17)
     started = time.monotonic()
     modes = ("duplex", "base") if args.mode == "both" else (args.mode,)
@@ -131,8 +138,12 @@ def main():
             manifest_path = model_folder / "manifest.json"
             if manifest_path.exists() and json.loads(manifest_path.read_text()) != manifest:
                 raise ValueError("Cannot resume a run with changed model/protocol settings")
-            manifest_path.write_text(json.dumps(manifest, indent=2))
-            for config in CONFIGS:
+            # Separate model processes may reach this file together. Publish
+            # complete JSON atomically so another worker cannot read a truncation.
+            temporary = model_folder / f"manifest-{args.shard_index}.tmp"
+            temporary.write_text(json.dumps(manifest, indent=2))
+            temporary.replace(manifest_path)
+            for config in configs:
                 while not (args.data / config).exists() or not list((args.data / config).glob("*/complete.json")):
                     print(f"waiting for {config} preparation", flush=True)
                     time.sleep(10)
@@ -144,7 +155,10 @@ def main():
                     while not (folder / "complete.json").exists():
                         time.sleep(10)
                     rows = [json.loads(s) for s in (folder / "manifest.jsonl").read_text().split("\n") if s.strip()]
-                    output = model_folder / f"{config}--{split}.jsonl"
+                    if args.num_shards > 1:
+                        rows = [r for r in rows if r["index"] % args.num_shards == args.shard_index]
+                    suffix = f"--shard-{args.shard_index}-of-{args.num_shards}" if args.num_shards > 1 else ""
+                    output = model_folder / f"{config}--{split}{suffix}.jsonl"
                     old = [json.loads(s) for s in output.read_text().split("\n") if s.strip()] if output.exists() else []
                     seen = {r["voicebench_id"] for r in old}
                     if len(old) != len(seen):
@@ -187,11 +201,14 @@ def main():
                             written += len(results)
                             del pending[:size]
                             print(f"{mode} {config}/{split} {written}/{len(rows)} batch={size} seconds={time.monotonic() - tick:.1f}", flush=True)
-                            (args.output / "status.json").write_text(json.dumps({"model": mode, "config": config,
+                            status = f"status-{mode}-{args.shard_index}.json" if args.num_shards > 1 else "status.json"
+                            (args.output / status).write_text(json.dumps({"model": mode, "config": config,
                                 "split": split, "written": written, "total": len(rows), "elapsed_s": time.monotonic() - started}))
                     if written != len(rows):
                         raise RuntimeError("Incomplete benchmark split")
-            (model_folder / "complete.json").write_text(json.dumps({"elapsed_s": time.monotonic() - started}))
+            marker = f"complete-shard-{args.shard_index}-of-{args.num_shards}.json" if args.num_shards > 1 else "complete.json"
+            (model_folder / marker).write_text(json.dumps({"elapsed_s": time.monotonic() - started,
+                "configs": configs, "num_shards": args.num_shards}))
         del engine
         gc.collect()
         torch.cuda.empty_cache()
