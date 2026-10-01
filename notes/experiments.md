@@ -823,3 +823,33 @@ Final corrected run: all 5,394 duplex examples rerun with at least 2 seconds of 
 Original / duplex (%): IFEval 42.21 / 18.11; AdvBench keyword refusal 99.42 / 75.77; OpenBookQA 74.73 / 63.52; MMSU 48.31 / 46.52; BBH 57.60 / 54.10. Strict MMSU 44.05 / 45.51 illustrates parser/random-fallback effects. Earlier no-mandatory-tail scores are superseded.
 
 Early and repeated text remains: 2,724 MMSU examples have multiple text segments; 2,717 begin over two seconds before source audio ends. Comparison includes interface/timing changes, so it does not isolate forgetting. Final artifacts: outputs/voicebench-response-gain003-silence/. Details: [completed benchmark](voicebench_full_epoch.md).
+
+## 2026-10-01 — README summary, storage cleanup and push preparation
+
+Added the completed VoiceBench comparison and five actual decoded examples to
+the README. The completed offline AdvBench session review gives original
+515/520 (99.04%) and duplex 432/520 (83.08%): 45 duplex keyword misses recovered
+and seven false positives removed. This is a separate semantic safety/non-support
+review, not the official refusal metric. The broader strict re-score was
+cancelled at the user's request; unfinished values are not reported.
+
+Per the latest request, all benchmark records stay local under
+`outputs/voicebench-response-gain003-silence/`; no evidence bundle is committed.
+Paired README examples are in `examples.json`; review decisions and summary are
+in `review/`. Verified README numbers against saved score files and checked the
+five examples against their paired saved outputs, hashes and token-file paths.
+No inference, training or GPT-4o judging was repeated.
+
+Removed 42 intermediate checkpoint/resume snapshots, superseded duplex outputs,
+excluded benchmark subsets, duplicate MUSAN cache and cancelled audit drafts.
+Reclaimed approximately 16.0 GiB; retained final adapters, distinct pilot adapters,
+training logs/metrics/TensorBoard events, compact trainer-state history and all
+current evaluated data/responses/traces. Cleanup inventory: `cleanup.json`.
+The authoritative baseline and NLTK directories now live with the corrected
+run; a legacy baseline symlink preserves paths embedded in saved records.
+
+The conclusion is partial knowledge retention on MMSU/BBH alongside learning
+the duplex event stream; losses on instruction following/safety and interface
+changes prevent a claim of zero forgetting. Created a dedicated Ed25519 SSH
+key outside the repo. GitHub authentication succeeds after the user added its
+public key. Remote master is an ancestor of local master; push can fast-forward.
