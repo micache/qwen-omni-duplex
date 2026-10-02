@@ -4,7 +4,77 @@ Completed: 5,394 paired audio examples, five offline subsets. All duplex samples
 
 Authoritative artifacts: `outputs/voicebench-response-gain003-silence/`.
 
-## Results
+## Duplex-only output review, 2026-10-02
+
+The README now uses the completed offline review below. Only duplex responses
+were re-scored; all original baseline figures and saved generations are unchanged.
+These are custom reviewed scores, not a replacement run of the official metrics.
+
+| Subset | Original baseline | Reviewed duplex | Correct duplex answers | Recovered / removed versus official |
+|---|---:|---:|---:|---:|
+| IFEval | 42.21 | 4.74 | 14/345 strict prompts | 0 / 33 strict prompts |
+| AdvBench | 99.42 | 83.08 | 432/520 | 45 / 7 |
+| OpenBookQA | 74.73 | 61.32 | 279/455 | 1 / 11 |
+| MMSU | 48.31 | 41.77 | 1,284/3,074 | 5 / 151 |
+| BBH | 57.60 | 40.00 | 400/1,000 | 6 / 147 |
+
+Screened every saved duplex answer, then reviewed changed/ambiguous extractions
+and candidates whose answer text did not contain the referenced choice verbatim.
+Reviewed 20 OpenBookQA, 591 MMSU and 325 BBH cases, plus all 102 IFEval responses
+receiving any original instruction credit. The completed AdvBench review supplies
+520 duplex decisions. This was offline inspection in this session, with no paid
+or external judge. It does not claim independent human adjudication of all 5,394
+responses. Decisions bind the entire original prompt and response by SHA-256;
+references, denominators and generated text are never edited.
+
+For single-choice tasks, require an unambiguous A–D/A–B selection; for binary
+tasks require Yes/No. Accept ordinary punctuation variants and repeated consistent
+prefixes. Do not enforce a new literal-colon rule. Reject conflicting choices,
+multiple selected options, a correct letter naming a different answer/value,
+unusable fragments/loops and answers to a different question. No random guesses
+receive credit. A correct selection with a consistent paraphrase remains correct;
+the review does not require every incidental reasoning statement to be perfect.
+Clear content-only answers lacking the requested choice/binary form remain wrong.
+
+IFEval retains its mean of strict/loose prompt/instruction accuracy. Whole
+unusable, wrong-task or structurally invalid responses get zero on all checks;
+otherwise retain the official per-instruction checks, including partial credit
+for separate keyword/length constraints. The resulting prompt submetrics are
+14/345 (4.06%) each; instruction submetrics are 27/498 (5.42%) each. Their mean
+is 4.74%, not the strict prompt percentage. Restored seed 17 and the upstream
+order of all strict checks followed by all loose checks to reproduce the original
+18.106774925790113% before applying review masks.
+
+Examples: OpenBookQA `test:152` says `B is correct. Evaporation...`, which the
+old parser misses. MMSU `business:171` and `philosophy:133` use valid `A is...`
+declarations. BBH `test:551` describes the correct A phrase and explicitly says
+`The answer is A.`; the upstream extractor instead selects B. Conversely, MMSU
+`biology:95` labels C but names geotropism instead of thigmotropism, and BBH
+`test:499` contains only `Yes, ifNo, you`. Neither receives credit.
+
+Local audit files: `review/corrected-scores.json`, `review/duplex-decisions.json`,
+`review/{config}-decisions.jsonl` and the existing `review/advbench-review.jsonl`.
+`scores.json` is the preserved official report. Its SHA-256 is
+`30f9043fbfa967a8b68a4a93e185f62180c67b1e81f610010d8438fb31f305bb`.
+Reproduce the review with the local decision ledger and pinned upstream checkout,
+running each config sequentially:
+
+```bash
+.venv/bin/python scripts/rescore_voicebench_duplex.py --config advbench --finalize
+.venv/bin/python scripts/rescore_voicebench_duplex.py --config openbookqa --finalize
+.venv/bin/python scripts/rescore_voicebench_duplex.py --config mmsu --finalize
+.venv/bin/python scripts/rescore_voicebench_duplex.py --config bbh --finalize
+.venv/bin/python scripts/rescore_voicebench_duplex.py --config ifeval --finalize
+```
+
+All original official totals must reproduce before corrected scores are written;
+finalization rejects ambiguous cases without matching decisions. Raw results and
+decision ledgers stay local, as requested; no evidence bundle is uploaded.
+The stricter duplex review widens the observed gaps. Retaining useful knowledge
+and learning duplex structure does not establish unchanged intelligence or isolate
+weight forgetting from inference/timing/formatting failures.
+
+## Original official results (preserved)
 
 All primary values are percentages; differences are percentage points. IFEval is the mean of strict/loose prompt/instruction accuracy; AdvBench is the official keyword refusal rate. The other rows use official accuracy.
 

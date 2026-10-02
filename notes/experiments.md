@@ -862,3 +862,31 @@ review (432/520, 83.08%) to the README immediately and removed the requested
 scoring paragraph. Raw official scores remain in `scores.json`; review decisions
 remain local in `review/advbench-review.jsonl`. Resume remaining offline subsets
 with full-response answers; unusable/irrelevant responses receive no credit.
+
+## 2026-10-02 — completed duplex-only offline output review
+
+Finished the resumed review without regenerating answers or re-scoring the
+baseline. README now reports AdvBench 83.08% (432/520), OpenBookQA 61.32%
+(279/455), MMSU 41.77% (1,284/3,074), BBH 40.00% (400/1,000), and reviewed
+IFEval 4.74% (mean of four retained instruction/prompt submetrics). Baseline
+numbers remain 42.21 / 99.42 / 74.73 / 48.31 / 57.60 in the original order.
+
+Relative to official scoring, recovered/removed duplex answers are AdvBench
+45/7, OpenBookQA 1/11, MMSU 5/151, BBH 6/147; IFEval removes 33 credited strict
+prompts. Counts include removal of random-fallback credit. Some genuine parser
+misses were recovered, but removing conflicting, wrong-value, irrelevant and
+invalid outputs lowered the other scores. Consistent repeated prefixes and
+ordinary punctuation variants remain acceptable; no new exact-colon rule.
+
+Added a small offline rescorer with hash-bound decision checks, exact original
+score reproduction and a finalization gate. Fixed its candidate-screening issues
+for answer-text initials (B.F. Skinner), capitalized choice descriptions, joined
+Yes/No fragments and IFEval's strict-then-loose seeded check order. Added 17
+regressions for these failures and prompt/whole-response identity. Local audit
+files remain under outputs/voicebench-response-gain003-silence/review/; no paid
+judge, downloads, training, baseline changes or evidence uploads. The README
+conclusion now reflects the wider reviewed gaps rather than calling BBH close
+to baseline. All five original totals reproduced; the corrected report and
+per-answer ledgers were byte-identical on replay, with all 32 baseline response
+files and the original score report unchanged. All 17 scoring regressions pass.
+Detailed rubric/counts: notes/voicebench_full_epoch.md.

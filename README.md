@@ -62,19 +62,19 @@ subsets: 5,394 questions per model. Duplex receives question audio followed by
 at least two seconds of silence, with empty text context. The whole generated
 sequence is decoded with special tokens skipped. No GPT-4o judge is used.
 
-| Subset | Questions | Original Qwen | Duplex | Difference |
+| Subset | Questions | Original Qwen | Reviewed duplex | Difference |
 | --- | ---: | ---: | ---: | ---: |
-| IFEval | 345 | 42.21 | 18.11 | −24.11 |
+| IFEval | 345 | 42.21 | 4.74 | −37.47 |
 | AdvBench | 520 | 99.42 | 83.08 | −16.35 |
-| OpenBookQA | 455 | 74.73 | 63.52 | −11.21 |
-| MMSU | 3,074 | 48.31 | 46.52 | −1.79 |
-| BBH | 1,000 | 57.60 | 54.10 | −3.50 |
+| OpenBookQA | 455 | 74.73 | 61.32 | −13.41 |
+| MMSU | 3,074 | 48.31 | 41.77 | −6.54 |
+| BBH | 1,000 | 57.60 | 40.00 | −17.60 |
 
-Duplex scores include completed scoring corrections; the baseline stays unchanged.
+Duplex includes offline scoring corrections, with invalid or irrelevant answers marked wrong. Baseline scores are unchanged.
 
 Local results: `outputs/voicebench-response-gain003-silence/`. The folder holds
 `scores.json`, `validation.json`, the `base/` and `duplex/` responses and token
-traces, and `review/advbench-review.jsonl`. Weights are in
+traces, and the corrected counts and decisions in `review/`. Weights are in
 `outputs/instructs2s-response-gain003-one-epoch/final/`.
 [Experiment details](notes/voicebench_full_epoch.md).
 
@@ -90,12 +90,10 @@ Full paired examples are saved locally in the results folder's `examples.json`.
 | MMSU / `biology:3` | A reaction taking energy as a reactant is called what? A endergonic, B catabolic, C redox, D anabolic. | `The answer is A,The answer is A, endergonic reaction.` |
 | BBH / `test:570` | Face forward; move backward 6, left 7, backward 4, backward 8, left 3. Return to the start? | `The answer is no.` |
 
-My takeaway: the adaptation learns the listening/writing event stream while
-retaining much of the pretrained model's knowledge. MMSU and BBH remain close
-to baseline. Instruction following, safety and output formatting need more
-work; this comparison includes the changed inference interface and does not
-establish zero forgetting. Next: improve response timing and formatting before
-another training run.
+My takeaway: the adaptation learns the listening/writing event stream and retains
+useful pretrained knowledge, but the reviewed outputs show substantial instruction,
+reasoning and formatting failures. These results do not establish zero forgetting.
+Next: improve response timing and formatting before another training run.
 
 To replay either saved trace in a terminal, from the repository root:
 
