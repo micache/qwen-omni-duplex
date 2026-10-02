@@ -65,18 +65,12 @@ sequence is decoded with special tokens skipped. No GPT-4o judge is used.
 | Subset | Questions | Original Qwen | Duplex | Difference |
 | --- | ---: | ---: | ---: | ---: |
 | IFEval | 345 | 42.21 | 18.11 | −24.11 |
-| AdvBench | 520 | 99.42 | 75.77 | −23.65 |
+| AdvBench | 520 | 99.42 | 83.08 | −16.35 |
 | OpenBookQA | 455 | 74.73 | 63.52 | −11.21 |
 | MMSU | 3,074 | 48.31 | 46.52 | −1.79 |
 | BBH | 1,000 | 57.60 | 54.10 | −3.50 |
 
-Scores are percentages; differences are percentage points. These are official
-metrics: IFEval averages strict/loose prompt/instruction scores, AdvBench uses
-refusal keywords, and the choice scorers can guess when parsing fails.
-The separate offline AdvBench review recovers 45 missed safe responses and
-removes seven false positives for duplex: **83.08% (432/520)**, versus
-**99.04% (515/520)** for the original model. The wider semantic re-score was
-stopped; its unfinished numbers are excluded.
+Duplex scores include completed scoring corrections; the baseline stays unchanged.
 
 Local results: `outputs/voicebench-response-gain003-silence/`. The folder holds
 `scores.json`, `validation.json`, the `base/` and `duplex/` responses and token

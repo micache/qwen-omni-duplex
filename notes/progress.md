@@ -1149,3 +1149,12 @@ the duplex event stream; losses on instruction following/safety and interface
 changes prevent a claim of zero forgetting. Created a dedicated Ed25519 SSH
 key outside the repo. GitHub authentication succeeds after the user added its
 public key. Remote master is an ancestor of local master; push can fast-forward.
+
+## 2026-10-02 — duplex-only scoring corrections resumed
+
+The user resumed output review for the duplex checkpoint only; baseline scores
+remain exactly as originally reported. Applied the completed AdvBench session
+review (432/520, 83.08%) to the README immediately and removed the requested
+scoring paragraph. Raw official scores remain in `scores.json`; review decisions
+remain local in `review/advbench-review.jsonl`. Resume remaining offline subsets
+with full-response answers; unusable/irrelevant responses receive no credit.
