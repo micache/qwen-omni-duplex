@@ -6,8 +6,10 @@ Authoritative artifacts: `outputs/voicebench-response-gain003-silence/`.
 
 ## Duplex-only output review, 2026-10-02
 
-The README now uses the completed offline review below. Only duplex responses
-were re-scored; all original baseline figures and saved generations are unchanged.
+The completed offline review below is preserved. The README displays original
+official IFEval/OpenBookQA/MMSU/BBH scores and reviewed AdvBench, with their
+scoring sources stated. Only duplex responses were re-scored; all original
+baseline figures and saved generations are unchanged.
 These are custom reviewed scores, not a replacement run of the official metrics.
 
 | Subset | Original baseline | Reviewed duplex | Correct duplex answers | Recovered / removed versus official |

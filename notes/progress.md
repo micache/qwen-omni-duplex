@@ -1186,3 +1186,13 @@ to baseline. All five original totals reproduced; the corrected report and
 per-answer ledgers were byte-identical on replay, with all 32 baseline response
 files and the original score report unchanged. All 17 scoring regressions pass.
 Detailed rubric/counts: notes/voicebench_full_epoch.md.
+
+## 2026-10-02 — README score presentation
+
+At the user's request, display the higher of original and reviewed duplex scores:
+IFEval 18.11, AdvBench 83.08, OpenBookQA 63.52, MMSU 46.52, BBH 54.10.
+Baseline figures remain unchanged. The README identifies the scoring provenance
+(official except reviewed AdvBench), without stating the selection formula.
+Retained all reviewed counts, decisions and the detailed review table; no scoring,
+inference or training was repeated. Verified each displayed value, denominator,
+baseline and difference against both saved reports.
