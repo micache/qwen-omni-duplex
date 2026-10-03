@@ -87,6 +87,38 @@ v1.5 overlap path below.
 
 This remains a text-timeline adaptation, not an official speech-output score.
 
+### Full-epoch checkpoint, v1 only
+
+The current checkpoint uses `scripts/run_full_duplex_v1.py`, rather than the
+older Session 13 loader. It keeps empty text context, full two-second padding,
+and the same frozen FP32 audio encoder as training. It processes the complete
+recording even after STOP; it adds no extra silence. All 727 released inputs
+are resampled to mono 16 kHz without moving their annotations.
+
+```bash
+.venv/bin/python scripts/run_full_duplex_v1.py --download --prepare-only
+.venv/bin/python -u scripts/run_full_duplex_v1.py --smoke > outputs/full-duplex-bench-v1-smoke.log 2>&1
+.venv/bin/python -u scripts/run_full_duplex_v1.py > outputs/full-duplex-bench-v1-run.log 2>&1
+.venv/bin/python scripts/run_full_duplex_v1.py --score-only
+```
+
+Supply the pinned upstream checkout with `--upstream` if it is elsewhere.
+Per-sample `output.json` has the benchmark's word `text`/`timestamp` structure.
+`result.json` retains every event ID, raw argmax, START/STOP frame, complete
+answer text and word interval. Empty answers remain in the denominator.
+
+Primary timing uses event position / 25 + 2 seconds, a fixed playout buffer
+that ensures the complete input chunk is available before its events appear.
+The unshifted frame timing is saved separately in `nominal_output.json`.
+Both clocks are clipped to the original recording length; interruption words
+are cropped at the annotated interruption end, matching upstream ASR cropping.
+These are simulated text timings and exclude actual inference compute time.
+Nonempty response envelopes stand in for VAD regions. Their durations describe
+text emission, not spoken audio, so comparisons to speech models are indicative.
+The interruption relevance judge is skipped.
+
+[Protocol and validation](../notes/full_duplex_bench_v1.md).
+
 ## Full-Duplex-Bench Session 14 v1.5 overlap adaptation
 
 The four paired v1.5 subsets are `user_interruption`, `user_backchannel`,

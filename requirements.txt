@@ -24,3 +24,5 @@ immutabledict==4.3.1
 langdetect==1.0.9
 loguru==0.7.3
 nltk==3.10.3
+# Optional explicit Full-Duplex-Bench v1 Google Drive download.
+gdown==6.4.1

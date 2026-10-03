@@ -900,3 +900,14 @@ Baseline figures remain unchanged. The README identifies the scoring provenance
 Retained all reviewed counts, decisions and the detailed review table; no scoring,
 inference or training was repeated. Verified each displayed value, denominator,
 baseline and difference against both saved reports.
+
+## Full-Duplex-Bench v1 preparation — 2026-10-03
+
+Evaluate the unchanged final one-epoch response-gain checkpoint on all four v1
+tests. Convert words and nonempty response envelopes into the released timing
+format, with a fixed two-second buffer to avoid crediting within-chunk lookahead.
+Keep unshifted timing separately, crop interruption at its end, and preserve the
+released scorer's thresholds and edge cases. All 727 inputs are prepared and the
+scoring bridge passes synthetic reference parity; full inference is queued to
+start when GPU capacity is available, without stopping the other workload.
+Protocol and limitations are recorded in `notes/full_duplex_bench_v1.md`.

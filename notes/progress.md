@@ -1196,3 +1196,15 @@ Baseline figures remain unchanged. The README identifies the scoring provenance
 Retained all reviewed counts, decisions and the detailed review table; no scoring,
 inference or training was repeated. Verified each displayed value, denominator,
 baseline and difference against both saved reports.
+
+## Full-Duplex-Bench v1 preparation — 2026-10-03
+
+Prepared all 727 v1 inputs and a separate final-checkpoint runner with empty
+context, full recording coverage and a causal two-second text playout buffer.
+Preserve nominal timing and raw event IDs, match the pinned offline scorers,
+and skip relevance judging. Fifteen focused tests and 48 synthetic fixtures
+validate timing and released-scorer parity. GPU inference is awaiting the user's
+answer about the unrelated VLLM engine reserving almost all A100 memory.
+A detached local runner will perform smoke/precision checks, full inference and
+persisted-score validation once 30,000 MiB GPU memory is free. All 50 repository
+tests pass. See `notes/full_duplex_bench_v1.md`; no model scores are available yet.
