@@ -1248,3 +1248,18 @@ answer about the unrelated VLLM engine reserving almost all A100 memory.
 A detached local runner will perform smoke/precision checks, full inference and
 persisted-score validation once 30,000 MiB GPU memory is free. All 50 repository
 tests pass. See `notes/full_duplex_bench_v1.md`; no model scores are available yet.
+
+## 2026-10-05 — Full-Duplex-Bench v1.0 complete on four GPUs
+
+Ran the newly reproduced one-epoch checkpoint on all 727 v1 recordings after
+five sample checks. Changed primary turn timing to START/25 and STOP/25 as
+requested; retained a separate +2 s buffered clock for the chunk lookahead.
+Four A100 replicas use duration-balanced shards, batches up to 64 and the
+existing CUDA graph/packed KV decoder. Full run manifest-to-aggregation time:
+119.84 seconds. All 337,750 input frames, 800 closed and 207 open turns audited;
+both clocks match all four pinned upstream scorers with text timing/duration
+substitutions. All 62 tests pass. Native smooth TOR 115/119; interruption TOR
+198/200; backchannel takeover remains high at 52/55. README now compares our
+text proxy rows against published PersonaPlex, Moshi and Freeze-Omni scores.
+Relevance is unmeasured because no API key is configured. Full protocol, counts,
+numerical limits and artifact paths: `notes/full_duplex_bench_v1.md`.

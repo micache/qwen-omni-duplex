@@ -1,109 +1,142 @@
-# Full-Duplex-Bench v1: full-epoch checkpoint
+# Full-Duplex-Bench v1.0 — completed 2026-10-05
 
-## Status
+Evaluated the newly reproduced one-epoch checkpoint on all 727 recordings and
+all four v1.0 tasks. The previous machine's queued evaluation was not used.
+Source and comparison table:
+[pinned benchmark release](https://github.com/DanielLin94144/Full-Duplex-Bench/blob/3e799c45a045256f47d5f1c9cda90157e2d2ec9e/v1_v1.5/README.md),
+revision `3e799c45a045256f47d5f1c9cda90157e2d2ec9e` (also upstream HEAD when checked).
 
-Dataset preparation and the v1 scoring bridge are complete. Model inference
-has not started: the A100 40 GB has about 38.4 GB reserved by a VLLM engine
-belonging to `qvr_phase4`. We are awaiting the user's answer about releasing
-that GPU. A detached local runner polls for at least 30,000 MiB free, then runs
-the five-sample smoke/graph-precision check, all 727 inputs, and score validation.
-It does not stop the VLLM workload. Its PID and status are in
-`outputs/full-duplex-bench-v1-response-gain003/supervisor.pid` and `supervisor.log`.
-No checkpoint benchmark scores or comparison claims are available yet.
+## Checkpoint and data
 
-## Sources and data
-
-Use only v1 from [the benchmark release](https://github.com/DanielLin94144/Full-Duplex-Bench/tree/3e799c45a045256f47d5f1c9cda90157e2d2ec9e/v1_v1.5),
-revision `3e799c45a045256f47d5f1c9cda90157e2d2ec9e`.
-The authors' [data instructions](https://github.com/DanielLin94144/Full-Duplex-Bench/blob/3e799c45a045256f47d5f1c9cda90157e2d2ec9e/v1_v1.5/dataset/README.md)
-link the public Google Drive release. Downloaded the five v1 archives only.
-
-| Test / subset | Samples | Original sample rate |
-| --- | ---: | ---: |
-| Pause / Candor | 216 | 16 kHz |
-| Pause / synthetic | 137 | 24 kHz |
-| Backchannel / ICC | 55 | 48 kHz |
-| Smooth turn-taking / Candor | 119 | 16 kHz |
-| User interruption / synthetic | 200 | 24 kHz |
-
-All 727 inputs are mono, finite and nonempty. Every annotation fits within its
-recording. The 24/48 kHz inputs are polyphase-resampled to 16 kHz, with durations
-preserved within one 16 kHz sample; timestamps remain on the original clock.
-No normalization, noise or text prompt is added. The prepared manifest stores
-source-file and resampled-PCM SHA256s plus the original annotations.
-
-Local data: `data/Full-Duplex-Bench-v1/` (2.1 GB including archives and prepared
-inputs). Preparation log: `outputs/full-duplex-bench-prepare.log`.
 Checkpoint: `outputs/instructs2s-response-gain003-one-epoch/final/`.
-Planned results: `outputs/full-duplex-bench-v1-response-gain003/`.
+Adapter identity SHA256:
+`0cc4d4f16adeb754ee795c0a75e5c298b8a586bffe71375cae65cf418e433a68`.
+Training-config SHA256:
+`7274c15d5ccb9f0c6175280a14e6e5e757abe26e8f9de7af10cc02eea50be684`.
+The model remains Qwen2.5-Omni-3B Thinker only, with empty context, additive
+fusion, fixed two-second chunks and 25 Hz events. Greedy decoding, seed 17.
 
-## Timing and scoring
+Downloaded only the five v1 archives linked by the authors' data instructions.
+All inputs are finite, mono and nonempty; annotations fit the original
+recordings. Polyphase resampling from 24/48 kHz to 16 kHz preserves duration
+within one 16 kHz sample. No noise, normalization or text prompt is added.
+The manifest retains original duration/annotations, source-file SHA256 and
+prepared-PCM SHA256. Total original input duration: 12,813.4653 seconds.
+Data: `data/Full-Duplex-Bench-v1/`; preparation log:
+`outputs/full-duplex-bench-prepare.log`.
 
-The native model produces one event every 40 ms and sees complete 2-second
-audio chunks. A frame-position timestamp alone can precede audio that influenced
-the prediction. Primary scoring therefore uses a fixed 2-second playout buffer:
-event frame `f` is placed at `f / 25 + 2`. This is never earlier than the end of
-the chunk used by that event and preserves the 25 Hz text-emission durations.
-The nominal `f / 25` clock is also retained, separately. Neither clock measures
-GPU runtime or establishes real-time performance.
+## Timing bridge
 
-All input chunks are processed with the existing batched decoder. Configure
-zero additional silent chunks and a lexical cap above the maximum possible
-recording frame count. Earlier STOPs do not terminate the recording. Partial
-input chunks are padded exactly as in training. Emitted words after the original
-recording end are excluded from scoring; raw events and unfinished answers remain
-saved. For interruption, crop word intervals at the interruption **end**, as
-the released ASR script crops output audio there. Do not reset that clock to zero.
+Primary `output.json` uses native START/STOP control boundaries: start at
+`start_frame / 25`, end at `stop_frame / 25`. Decode words independently within
+each turn, skipping special tokens and retaining subtoken frame times. Anchor
+the first word's start and last word's end to the control boundaries so the
+released transcript-span formulas see the requested turn times. Interior words
+retain their lexical times. Control-only turns have no scored text interval.
 
-Decode words independently within each START/STOP response, skipping special
-tokens but preserving raw event IDs. Multi-token words span the first through
-last contributing event, with one frame of width for the final token.
-Control-only answers contribute no words or response intervals. Nonempty answer
-envelopes replace speech VAD regions; they are a text-only proxy, not measured
-speech durations. Published audio-model scores are not directly comparable.
+Process every padded input frame, including frames after earlier STOPs. No
+extra silence or early termination is added. Clip scoring to the original
+recording duration. Open turns remain explicitly right-censored; never invent
+a STOP. For interruption, crop output at the annotated interruption **end**,
+preserving the original clock, as the released ASR preparation does.
 
-The v1 formulas match the pinned evaluators, including their edge cases:
+The model sees a complete two-second chunk before predicting its events.
+Native frame timestamps therefore credit within-chunk lookahead. A separate
+`causal.json` places each event at `frame / 25 + 2` and applies the same horizon
+and crop. This is a conservative playout schedule, not GPU execution latency.
+The alternative file deliberately does not end in `output.json`: upstream
+pause/turn scorers would otherwise count it as a second prediction.
 
-- Pause and turn-taking: takeover if the full transcript span is at least one
-  second or contains more than three words. They do not use the backchannel
-  two-word threshold. Latency is clamped at zero and averaged only for takeovers.
-- Backchannel: the duration/word thresholds are applied to each proxy region;
-  no response gives frequency zero and JSD one. Use the released inclusive
-  200 ms bins, epsilon, linear reference interpolation and SciPy JSD.
-- The released backchannel scorer overwrites TOR on successive short regions,
-  includes those regions in frequency/JSD even if they are takeovers, and stops
-  scanning at a region longer than three seconds. Preserve this behavior for
-  reference parity; additionally save `any_region_takeover_rate` for inspection.
-- Skip the interruption relevance judge. There are no external API calls.
+Nonempty control intervals replace speech VAD; decoded word timestamps replace
+ASR. These are **text timing proxies**, not official speech measurements.
+Published comparator conditioning and audio output differ. No speech is
+synthesized. Differences between clocks include clipping and therefore change
+takeover/frequency as well as latency.
 
-The earlier Session 13 adapter is not used: its loader adds an incompatible chat
-prefix, uses different takeover aggregation, and excludes some backchannel
-cases from conditional metrics. The final checkpoint requires empty context.
+## Results and exact denominators
 
-## Validation so far
+| Subset | N | Native takeovers | Native TOR | Buffered takeovers | Buffered TOR |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Synthetic pause | 137 | 37 | 0.270073 | 19 | 0.138686 |
+| Candor pause | 216 | 113 | 0.523148 | 71 | 0.328704 |
+| ICC backchannel | 55 | 52 | 0.945455 | 17 | 0.309091 |
+| Candor smooth turn-taking | 119 | 115 | 0.966387 | 114 | 0.957983 |
+| Synthetic user interruption | 200 | 198 | 0.990000 | 200 | 1.000000 |
 
-15 focused tests cover subtoken word timing, special-token exclusion, independent
-responses, open answers, control-only silence, crop/horizon boundaries, causal
-chunk boundaries, released scoring thresholds and multi-response inference.
-The multi-response test executes the batched engine's eager loop with a small
-deterministic CPU decoder and confirms all 100 frames are processed after the
-first STOP. Together with the existing inference checks, 20 tests pass;
-the full repository suite passes all 50 tests (14 existing Torch deprecation
-warnings).
+| Metric | Native | Buffered |
+| --- | ---: | ---: |
+| Backchannel frequency / second | 0.046434798108135736 | 0.01661375264058375 |
+| Backchannel JSD | 0.8256058553189928 | 0.9134311367571518 |
+| Smooth latency / second | 0.059478260869571725 (115 responses) | 1.73719298245616 (114 responses) |
+| Interruption latency / second | 0.06697643097643087 (198 responses) | 1.9113199999999997 (200 responses) |
+| Interruption relevance judge | Unmeasured | Unmeasured |
 
-Also executed all four actual pinned upstream evaluators against 48 synthetic
-fixtures (12 per test). The adapter matches TOR and conditional latency exactly,
-and backchannel frequency/JSD within the released four-decimal output precision.
-Only synthetic VAD regions and an in-process synthetic judge response were
-substituted for that code-parity check; no speech or model outputs were fabricated,
-and no judge score will be reported. Fixture report:
-`outputs/full-duplex-bench-v1-fixture-validation.json`.
+Latency is zero-clamped and conditional on takeover. Pause, smooth and
+interruption takeover uses the full transcript envelope of at least one second
+or more than three words. Backchannel preserves the released short-region TOR
+overwrite, inclusion of takeover regions in frequency/JSD, and break at >3 s.
+Additional any-region takeover rate is 0.945455 native / 0.327273 buffered.
+JSD uses inclusive 200 ms bins, epsilon, linear reference interpolation and
+SciPy Jensen-Shannon distance, exactly as released. Frequency and JSD are means
+over all 55 recordings, including silence. They use original-clock duration.
 
-## Comparison source after inference
+No OpenAI API key is configured, so no external judge was called and no rating
+was inferred. The upstream table labels its column GPT-4o, while the pinned
+interruption script actually requests `gpt-4-turbo`; the comparison retains the
+published column label and leaves ours unmeasured.
 
-Use the benchmark maintainers' [pinned v1 result table](https://github.com/DanielLin94144/Full-Duplex-Bench/blob/3e799c45a045256f47d5f1c9cda90157e2d2ec9e/v1_v1.5/README.md)
-for PersonaPlex, Moshi and Freeze-Omni. Do not mix it with NVIDIA's separately
-reported PersonaPlex protocol or newer third-party reproductions. Published
-models produce speech, and PersonaPlex uses task-specific text/voice conditioning.
-Our checkpoint has empty context and text-only output. The eventual README table
-must identify this distinction and leave our judge column unmeasured.
+## Four-GPU execution and verification
+
+Four independent A100-SXM4-40GB workers, one model replica per GPU; shards
+contain 182/181/182/182 unique recordings, balanced by padded frame count.
+Duration-sorted batches up to 64, frame budget 120,000, four CPU threads per
+worker. Reused the existing packed KV cache, builtin FlashAttention and CUDA
+graphs. No new dependencies or training changes. Bulk GPU utilization was
+96–97%; peak allocated memory 11.52/13.37/13.02/12.56 GiB. Worker inference
+times including output persistence were 97.0/74.5/71.7/68.5 seconds. From run
+manifest creation through final aggregation: 119.84 seconds (not a streaming
+real-time factor or a speedup comparison).
+
+Before full inference, ran one sample from every subset on all four GPUs.
+Each worker compared 150 optimized decoding steps with native eager attention:
+grammar argmax agreement 0.993333/1.0/1.0/1.0; mean absolute logit differences
+0.018771/0.017322/0.020614/0.020052. One frame's argmax differed under BF16;
+the optimized path is numerically close, not bitwise identical. These checks
+validate representative prefixes, not every frame's optimized/eager equality.
+
+After inference, the runner reloaded and reconstructed all segments and both
+output clocks from persisted token IDs, checked checkpoint/data identities,
+and recomputed every score. A separate audit checked all **337,750 frames**,
+**800 closed turns** and **207 open turns**, raw control grammar, timestamp
+ordering/horizons/crops, exact START/STOP conversion and complete coverage.
+All 727 samples are present; no truncation or excluded silent recording.
+
+The separate audit executed all four unmodified pinned upstream scorers on the
+five smoke samples, then all 727 predictions, for both clocks. Only the VAD/
+audio interfaces and external judge were substituted: VAD returns native turn
+intervals, the duration-only shape interface passes exact original duration
+(without rounding to a fabricated 16 kHz waveform), and a dummy judge response
+checks scorer plumbing. Dummy ratings are never included in measured results.
+Every TOR, conditional latency, frequency and JSD matches within 1e-12.
+Upstream divides by zero for zero qualifying turns; the bridge correctly
+records null latency instead. The repository suite passes 62 tests with 14
+existing Torch deprecation warnings.
+
+Local artifacts: `outputs/full-duplex-bench-v1-response-gain003/` contains
+`manifest.json`, `summary.json`, `upstream-parity.json`, `gpu-*.log`,
+`aggregate.log`, per-recording raw events/segments/two clocks/scores, and
+`smoke/` with graph precision and scorer-parity reports. README comparators
+were checked against the pinned/current upstream table; no comparator reruns.
+
+```bash
+# Requires the pinned upstream clone, prepared data and final local checkpoint.
+bash scripts/run_full_duplex_v1_4gpu.sh --smoke
+.venv/bin/python scripts/audit_full_duplex_v1.py --output outputs/full-duplex-bench-v1-response-gain003/smoke
+bash scripts/run_full_duplex_v1_4gpu.sh
+.venv/bin/python scripts/audit_full_duplex_v1.py
+.venv/bin/python -m pytest -q
+```
+
+Existing matching results are resumed and revalidated, not silently overwritten.
+Native backchannel behavior remains poor; the very short native response
+latencies must be interpreted with the chunk-lookahead limit above.

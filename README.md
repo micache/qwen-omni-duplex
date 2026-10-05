@@ -96,6 +96,38 @@ useful pretrained knowledge, but the reviewed outputs show substantial instructi
 reasoning and formatting failures. These results do not establish zero forgetting.
 Next: improve response timing and formatting before another training run.
 
+## Full-Duplex-Bench v1.0
+
+Evaluated the reproduced one-epoch checkpoint on all four tasks: 727 recordings
+(137 synthetic pauses, 216 Candor pauses, 55 backchannel, 119 smooth turn-taking,
+200 interruptions). Five sample runs passed before the full run on four A100s.
+Turn boundaries use `START frame / 25` and `STOP frame / 25`; unfinished turns
+are censored at recording end. Our rows use text timing in place of ASR/VAD.
+The speech-model rows below are copied from the benchmark's
+[v1.0 README table](https://github.com/DanielLin94144/Full-Duplex-Bench/blob/3e799c45a045256f47d5f1c9cda90157e2d2ec9e/v1_v1.5/README.md).
+
+| Model / timing | Pause synthetic TOR ↓ | Pause Candor TOR ↓ | Backchannel TOR ↓ | Freq / s ↑ | JSD ↓ | Smooth TOR ↑ | Smooth latency / s ↓ | Interruption TOR ↑ | GPT-4o ↑ | Interruption latency / s ↓ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| PersonaPlex (published speech) | 0.584 | 0.662 | 0.327 | 0.025 | 0.649 | 0.992 | 0.070 | 1.000 | 4.210 | 0.400 |
+| Moshi (published speech) | 0.985 | 0.980 | 1.000 | 0.001 | 0.957 | 0.941 | 0.265 | 1.000 | 0.765 | 0.257 |
+| Freeze-Omni (published speech) | 0.642 | 0.481 | 0.636 | 0.001 | 0.997 | 0.336 | 0.953 | 0.867 | 3.615 | 1.409 |
+| Our duplex (START/STOP text proxy) | 0.270 | 0.523 | 0.945 | 0.046 | 0.826 | 0.966 | 0.059 | 0.990 | — | 0.067 |
+| Our duplex (+2 s buffered text proxy) | 0.139 | 0.329 | 0.309 | 0.017 | 0.913 | 0.958 | 1.737 | 1.000 | — | 1.911 |
+
+Our native clock credits positions inside complete two-second audio chunks;
+the buffered row exposes that lookahead by delaying events two seconds and
+cropping at the same recording end. These are text timing proxies, so they do
+not establish speech-model ranking or measured real-time latency. Latency is
+averaged only over qualifying responses. The relevance judge was not run
+because no API key is configured. Backchannel control remains weak on the native
+clock (52/55 takeovers).
+
+All saved events, timestamps and scores were rechecked, and both clocks match
+the pinned upstream scorers with text intervals and the original recording
+duration substituted for audio VAD. The full run took about 120 seconds across
+four GPUs; 62 local tests pass. [Protocol, counts and reproduction commands](notes/full_duplex_bench_v1.md).
+Local results: `outputs/full-duplex-bench-v1-response-gain003/`.
+
 To replay either saved trace in a terminal, from the repository root:
 
 ```bash

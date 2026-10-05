@@ -113,7 +113,7 @@ def read_audio(row):
 
 
 def event_segments(events, tokenizer, controls):
-    """Save native control times and lexical envelopes, including open answers."""
+    """Use START/STOP frames as turn boundaries; retain lexical word timing."""
     segments, active = [], None
     specials = set(getattr(tokenizer, "all_special_ids", ()))
     decoder = SimpleNamespace(decode=lambda ids, **kw: tokenizer.decode(
@@ -147,19 +147,21 @@ def event_segments(events, tokenizer, controls):
         segment["words"] = [{"text": word.text, "timestamp": [
             min(t.audio_time_s for t in word.token_timings),
             max(t.audio_time_s for t in word.token_timings) + 1 / RATE]} for word in words]
-        segment["interval"] = ([segment["words"][0]["timestamp"][0],
-            segment["words"][-1]["timestamp"][1]] if words else None)
+        segment["interval"] = ([segment["start_frame"] / RATE,
+            (segment["stop_frame"] if segment["stop_frame"] is not None else len(events)) / RATE]
+            if words else None)
+        segment["right_censored"] = segment["stop_frame"] is None
     return segments
 
 
-def timed_output(segments, horizon, *, delay_s=CHUNK_DELAY_S, crop_start=0.0):
-    """A constant two-second playout buffer preserves durations and causality.
+def timed_output(segments, horizon, *, delay_s=0.0, crop_start=0.0):
+    """Map control boundaries to seconds, optionally using a causal buffer.
 
     Event f is scheduled at f/25 + 2, after its complete input chunk arrives.
     Keep output inside the original recording, just like upstream output.wav.
     Interruption transcription starts at the annotated interruption end.
     """
-    chunks, intervals = [], []
+    chunks, intervals, turns = [], [], []
     for segment in segments:
         selected = []
         for word in segment["words"]:
@@ -167,12 +169,22 @@ def timed_output(segments, horizon, *, delay_s=CHUNK_DELAY_S, crop_start=0.0):
             if end <= crop_start or start >= horizon:
                 continue
             selected.append({"text": word["text"], "timestamp": [max(crop_start, start), min(horizon, end)]})
-        chunks.extend(selected)
         if selected:
-            intervals.append([selected[0]["timestamp"][0], selected[-1]["timestamp"][1]])
+            start, end = segment["interval"]
+            interval = [max(crop_start, start + delay_s), min(horizon, end + delay_s)]
+            # Upstream scores first/last ASR word timestamps. Anchor those two
+            # edges to native controls, preserving interior subtoken timings.
+            selected[0]["timestamp"][0] = interval[0]
+            selected[-1]["timestamp"][1] = interval[1]
+            intervals.append(interval)
+            turns.append({"timestamp": interval, "text": " ".join(w["text"] for w in selected),
+                          "start_frame": segment["start_frame"], "stop_frame": segment["stop_frame"],
+                          "right_censored": segment["right_censored"] or end + delay_s > horizon})
+        chunks.extend(selected)
     return {"text": " ".join(word["text"] for word in chunks), "chunks": chunks,
             "response_intervals": intervals, "duration_s": horizon, "delay_s": delay_s,
-            "crop_start_s": crop_start, "speech_output": False}
+            "crop_start_s": crop_start, "speech_output": False, "turns": turns,
+            "turn_boundaries": "START/25 and STOP/25; open turns censored at recording end"}
 
 
 def score_output(row, output, ground_truth=None):
@@ -218,7 +230,7 @@ def score_output(row, output, ground_truth=None):
         "counted_regions": len(predictions)}
 
 
-def summarize(records, clock="causal"):
+def summarize(records, clock="nominal"):
     summary = {}
     for subset, (_, expected, _) in SUBSETS.items():
         rows = [row["scores"][clock] for row in records if row["subset"] == subset]
@@ -237,3 +249,15 @@ def summarize(records, clock="causal"):
                 latency_samples=len(latencies))
         summary[subset] = result
     return summary
+
+
+def partition_records(rows, num_shards):
+    """Balance total frames, distributing long recordings across GPU workers."""
+    if num_shards < 1:
+        raise ValueError("num_shards must be positive")
+    shards, costs = [[] for _ in range(num_shards)], [0] * num_shards
+    for row in sorted(rows, key=lambda r: (-r["samples"], r["id"])):
+        shard = min(range(num_shards), key=lambda i: (costs[i], i))
+        shards[shard].append(row)
+        costs[shard] += ((row["samples"] + 31999) // 32000) * 50
+    return shards

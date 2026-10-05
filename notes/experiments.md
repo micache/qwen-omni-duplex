@@ -1023,3 +1023,34 @@ released scorer's thresholds and edge cases. All 727 inputs are prepared and the
 scoring bridge passes synthetic reference parity; full inference is queued to
 start when GPU capacity is available, without stopping the other workload.
 Protocol and limitations are recorded in `notes/full_duplex_bench_v1.md`.
+
+## 2026-10-05 — Full-Duplex-Bench v1.0 final checkpoint evaluation
+
+Completed all four tasks / five subsets / 727 recordings on four A100s using
+the reproduced response-gain003 one-epoch adapter (identity SHA256 starts
+0cc4d4f16ade). Empty context, greedy decoding, seed 17, fixed 2 s chunks, 25 Hz.
+Primary response intervals now use native START/STOP frames divided by 25;
+first/last word edges are anchored to those controls. Partial/open responses
+are clipped/censored at the original recording horizon, with no fabricated STOP.
+Interruption crop remains at interruption end on the original clock. Separate
++2 s buffered output exposes lookahead and horizon effects.
+
+Five sample predictions and per-GPU eager-versus-graph precision audits passed
+before full inference. One argmax differed among the tested BF16 prefixes;
+optimized inference is not bitwise identical. Full execution took 119.84 s
+from manifest to aggregate, with bulk four-GPU utilization 96–97%. Persisted
+raw events reconstruct all outputs/scores; separate control/coverage audit
+passes all 337,750 frames, and unmodified upstream scorers reproduce both
+clock reports with native intervals/original duration substituted for audio.
+Dummy judge replies validate scorer plumbing only; no external API or relevance
+rating was measured. All 62 tests pass.
+
+Native pause TOR synthetic 37/137, Candor 113/216; backchannel TOR 52/55,
+frequency 0.046435/s, JSD 0.825606; smooth TOR 115/119, conditional latency
+0.059478 s; interruption TOR 198/200, conditional latency 0.066976 s. Buffered
+smooth/interruption latencies are 1.737193/1.911320 s. Native short latency
+credits within-chunk lookahead and cannot establish real-time speech ranking.
+README comparator values are the pinned/current upstream published table,
+not reruns. Detailed counts, exact values and commands:
+`notes/full_duplex_bench_v1.md`; local results:
+`outputs/full-duplex-bench-v1-response-gain003/`.

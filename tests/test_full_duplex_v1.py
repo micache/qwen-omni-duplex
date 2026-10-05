@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from benchmarks.full_duplex_v1 import event_segments, score_output, timed_output
+from benchmarks.full_duplex_v1 import event_segments, partition_records, score_output, timed_output
 
 
 CONTROLS = SimpleNamespace(idle=1, start=2, stop=3)
@@ -28,7 +28,7 @@ def test_word_times_include_every_subtoken_and_separate_answers():
 def test_two_second_buffer_is_causal_at_chunk_boundaries():
     events = [1] * 48 + [2, 10, 11, 12, 3]
     segments = event_segments(events, Tokenizer(), CONTROLS)
-    causal = timed_output(segments, 10)
+    causal = timed_output(segments, 10, delay_s=2)
     nominal = timed_output(segments, 10, delay_s=0)
     for word, original in zip(causal["chunks"], nominal["chunks"]):
         assert word["timestamp"][0] - original["timestamp"][0] == pytest.approx(2)
@@ -49,11 +49,38 @@ def test_empty_control_answers_do_not_count_and_open_answers_are_kept():
 
 def test_recording_horizon_and_interruption_crop_keep_original_clock():
     segments = [{"words": [{"text": "a", "timestamp": [0, 0.4]},
-        {"text": "b", "timestamp": [1, 1.4]}, {"text": "c", "timestamp": [4, 5]}]}]
-    output = timed_output(segments, 3.2, crop_start=2.2)
+        {"text": "b", "timestamp": [1, 1.4]}, {"text": "c", "timestamp": [4, 5]}],
+        "interval": [0, 5], "start_frame": 0, "stop_frame": 125, "right_censored": False}]
+    output = timed_output(segments, 3.2, crop_start=2.2, delay_s=2)
     assert output["chunks"] == [{"text": "a", "timestamp": [2.2, 2.4]},
         {"text": "b", "timestamp": [3.0, 3.2]}]
     assert output["response_intervals"] == [[2.2, 3.2]]
+
+
+def test_native_turn_edges_use_start_stop_even_with_idle_gaps():
+    segments = event_segments([2, 1, 1, 10, 1, 1, 3], Tokenizer(), CONTROLS)
+    output = timed_output(segments, 8)
+    assert output["response_intervals"] == [[0, 6 / 25]]
+    assert output["chunks"][0]["timestamp"] == [0, 6 / 25]
+    assert output["turns"][0]["stop_frame"] == 6
+    assert not output["turns"][0]["right_censored"]
+
+
+def test_open_turn_is_censored_without_inventing_stop():
+    segments = event_segments([2, 10, 1, 1], Tokenizer(), CONTROLS)
+    output = timed_output(segments, .14)
+    assert output["response_intervals"] == [[0, .14]]
+    assert output["turns"][0]["stop_frame"] is None
+    assert output["turns"][0]["right_censored"]
+
+
+def test_four_gpu_partition_has_unique_complete_balanced_coverage():
+    rows = [{"id": str(i), "samples": 16000 * duration} for i, duration in enumerate(range(1, 101))]
+    shards = partition_records(rows, 4)
+    assert sorted(r["id"] for s in shards for r in s) == sorted(r["id"] for r in rows)
+    assert len({r["id"] for s in shards for r in s}) == 100
+    costs = [sum(((r["samples"] + 31999)//32000)*50 for r in shard) for shard in shards]
+    assert max(costs)-min(costs) <= 50
 
 
 def output_for_words(count, duration):
