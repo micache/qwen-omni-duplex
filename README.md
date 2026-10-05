@@ -111,8 +111,10 @@ The speech-model rows below are copied from the benchmark's
 | PersonaPlex (published speech) | 0.584 | 0.662 | 0.327 | 0.025 | 0.649 | 0.992 | 0.070 | 1.000 | 4.210 | 0.400 |
 | Moshi (published speech) | 0.985 | 0.980 | 1.000 | 0.001 | 0.957 | 0.941 | 0.265 | 1.000 | 0.765 | 0.257 |
 | Freeze-Omni (published speech) | 0.642 | 0.481 | 0.636 | 0.001 | 0.997 | 0.336 | 0.953 | 0.867 | 3.615 | 1.409 |
-| Our duplex (START/STOP text proxy) | 0.270 | 0.523 | 0.945 | 0.046 | 0.826 | 0.966 | 0.059 | 0.990 | — | 0.067 |
-| Our duplex (+2 s buffered text proxy) | 0.139 | 0.329 | 0.309 | 0.017 | 0.913 | 0.958 | 1.737 | 1.000 | — | 1.911 |
+| **Our duplex (START/STOP text proxy)** | **0.270** | **0.523** | **0.945** | **0.046** | **0.826** | **0.966** | **0.059** | **0.990** | **—** | **0.067** |
+| **Our duplex (+2 s buffered text proxy)** | **0.139** | **0.329** | **0.309** | **0.017** | **0.913** | **0.958** | **1.737** | **1.000** | **—** | **1.911** |
+
+Bold rows identify our model.
 
 Our native clock credits positions inside complete two-second audio chunks;
 the buffered row exposes that lookahead by delaying events two seconds and
