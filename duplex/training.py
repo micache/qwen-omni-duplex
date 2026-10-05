@@ -461,7 +461,7 @@ def build_training_model(config: Mapping[str, Any]) -> tuple[QwenDuplexThinker, 
     load_kwargs: dict[str, Any] = {
         **common,
         "torch_dtype": torch.bfloat16,
-        "device_map": {"": "cuda:0"},
+        "device_map": {"": f"cuda:{int(os.environ.get('LOCAL_RANK', 0))}"},
         "attn_implementation": "sdpa",
         "low_cpu_mem_usage": True,
     }
@@ -889,12 +889,21 @@ class Session08Trainer(Trainer):
             raise RuntimeError("The custom duplex model returned no training loss.")
         if not torch.isfinite(outputs.loss):
             raise FloatingPointError("Non-finite duplex loss.")
-        if outputs.loss_weight_sum is None or outputs.loss_weight_sum.item() <= 0:
+        if outputs.loss_weight_sum is None or (
+            outputs.loss_weight_sum.item() <= 0 and not inputs.get("_empty_rank", False)
+        ):
             raise RuntimeError("Empty weighted batch: no positive-weight supervised events.")
+        loss = outputs.loss
+        reported_loss = loss.detach()
+        if self.accelerator.num_processes > 1:
+            from .distributed import normalize_distributed_loss
+            loss, reported_loss = normalize_distributed_loss(loss, outputs.loss_weight_sum)
+            if not model.training:
+                loss = reported_loss
         mode = "train" if model.training else "eval"
         totals = self.metric_totals[mode]
         totals["batches"] += 1
-        totals["total_loss"] += float(outputs.loss.detach())
+        totals["total_loss"] += float(reported_loss)
         valid_count = 0
         for group in GROUPS:
             count = int(outputs.target_counts[group].detach())
@@ -905,7 +914,26 @@ class Session08Trainer(Trainer):
             valid_count += count
         totals["frames_processed"] += valid_count
         totals["tokens_processed"] += int(outputs.target_counts["text"].detach())
-        return (outputs.loss, outputs) if return_outputs else outputs.loss
+        return (loss, outputs) if return_outputs else loss
+
+    def _prepare_frame_loader(self, loader):
+        if self.accelerator.num_processes == 1:
+            return self.accelerator.prepare(loader)
+        from accelerate.data_loader import prepare_data_loader
+        # The collator has already split each original batch. Do not shard the
+        # sampler again: all ranks must retain the original 3,750 updates.
+        return prepare_data_loader(
+            loader, device=self.accelerator.device, num_processes=1,
+            process_index=0, put_on_device=True, rng_types=[],
+        )
+
+    def _frame_collator(self):
+        if self.accelerator.num_processes == 1:
+            return self.data_collator
+        from .distributed import SplitGlobalBatchCollator
+        return SplitGlobalBatchCollator(
+            self.data_collator, self.accelerator.process_index, self.accelerator.num_processes
+        )
 
     def get_train_dataloader(self):
         budget = self.raw_config["training"].get("max_batch_frames")
@@ -919,13 +947,13 @@ class Session08Trainer(Trainer):
             seed=self.args.data_seed,
         )
         loader = DataLoader(
-            self.train_dataset, batch_sampler=sampler, collate_fn=self.data_collator,
+            self.train_dataset, batch_sampler=sampler, collate_fn=self._frame_collator(),
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.dataloader_pin_memory,
             persistent_workers=self.args.dataloader_persistent_workers,
             prefetch_factor=self.args.dataloader_prefetch_factor,
         )
-        return self.accelerator.prepare(loader)
+        return self._prepare_frame_loader(loader)
 
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
         del prediction_loss_only, ignore_keys
@@ -944,17 +972,23 @@ class Session08Trainer(Trainer):
             max_batch_size=self.args.per_device_eval_batch_size,
             seed=self.args.data_seed,
         )
-        loader = DataLoader(dataset, batch_sampler=sampler, collate_fn=self.data_collator,
+        loader = DataLoader(dataset, batch_sampler=sampler, collate_fn=self._frame_collator(),
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.dataloader_pin_memory,
             persistent_workers=self.args.dataloader_persistent_workers,
             prefetch_factor=self.args.dataloader_prefetch_factor)
-        return self.accelerator.prepare(loader)
+        return self._prepare_frame_loader(loader)
 
     def _consume_metrics(self, mode: str) -> dict[str, float]:
         totals = self.metric_totals.pop(mode, None)
         if not totals:
             return {}
+        if self.accelerator.num_processes > 1:
+            keys = sorted(totals)
+            values = torch.tensor([totals[key] for key in keys], dtype=torch.float64,
+                                  device=self.accelerator.device)
+            torch.distributed.all_reduce(values)
+            totals = dict(zip(keys, values.tolist()))
         batches = max(totals["batches"], 1.0)
         valid = max(sum(totals[f"label_count_{group}"] for group in GROUPS), 1.0)
         result = {f"{mode}_total_loss": totals["total_loss"] / batches}
@@ -1129,6 +1163,7 @@ def make_training_arguments(config: Mapping[str, Any], *, max_steps: int | None 
         dataloader_persistent_workers=bool(training.get("dataloader_persistent_workers", False)),
         dataloader_prefetch_factor=training.get("dataloader_prefetch_factor"),
         accelerator_config={"even_batches": False} if training.get("max_batch_frames") else None,
+        ddp_find_unused_parameters=False,
         remove_unused_columns=False,
         prediction_loss_only=True,
         auto_find_batch_size=False,
@@ -1515,6 +1550,8 @@ def _session09_gate(
 def train_from_config(config: Mapping[str, Any]) -> Session08Trainer | SimpleNamespace:
     """Run the configured job; callers decide whether it is a smoke or real dataset run."""
 
+    if "LOCAL_RANK" in os.environ:
+        torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
     seed_everything(config["training"]["seed"])
     torch.cuda.reset_peak_memory_stats()
     model, processor, targets = build_training_model(config)
@@ -1546,6 +1583,7 @@ def train_from_config(config: Mapping[str, Any]) -> Session08Trainer | SimpleNam
     assert_optimizer_scope(trainer)
     final = output_dir / "final"
     trainer.save_model(final)
+    trainer.save_state()
     if not session09:
         return trainer
 

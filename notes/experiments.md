@@ -1,5 +1,78 @@
 # Experiments
 
+## 2026-10-05 — four-GPU reproduction setup (in progress)
+
+Hardware: four NVLink-connected NVIDIA A100-SXM4-40GB GPUs, driver 580.178.04,
+48 CPU threads, 334 GiB RAM. Installed the unchanged `requirements.txt` into
+`.venv` using Python 3.11; `uv pip check` passes for 102 packages. Qwen revision
+is `f75b40e3da2003cdd6e1829b1f420ca70797c34e`; MUSAN noise revision matches the
+previous run, `76f9882cfa4475efe11508ac9aa32722f84ca5b7`.
+
+The training recipe retains listening/response audio gains 1/0.03, FP32 frozen
+audio encoding, BF16 text decoding, TF32 off, rank-16 LoRA, constant 2e-4 fused
+AdamW, event weights 1/0.1/4/4, 20% noise at 5–20 dB, 20% synthetic
+interruption, empty context, all seeds, and the original frame-budget sampler.
+The only YAML difference is clearing the missing resume checkpoint. This is a
+fresh reproduction, not bitwise recovery of the previous interrupted job;
+partitioned floating-point kernels and dropout streams can change numerics.
+
+Each global batch is augmented before rank partitioning, retaining the original
+donor and random-draw sequence. All ranks execute every global update; ranks
+without examples run a zero-target duplicate. Since
+[PyTorch DDP averages gradients](https://docs.pytorch.org/docs/stable/generated/torch.nn.parallel.DistributedDataParallel.html),
+local mean loss is multiplied by `world_size * local_weight / global_weight`.
+Tests verify gradients against the original full-batch weighted objective and
+ragged audio/example coverage for global batch sizes 1, 2, 3, 5, 11 and 26.
+
+Four-GPU real-model smoke: 5 updates over 9 synthetic examples, 900 training
+frames and 900 evaluation frames, exactly 9 START/STOP labels in each pass,
+all 504 LoRA tensors with nonzero gradients, and saved-adapter reload PASS.
+The first launch failed before training due to this server's inherited gIB
+network plugin. `NCCL_NET=Socket` resolved it. The smoke is correctness evidence,
+not a training-quality or representative speed result. Local pytest: 59 passed.
+
+The main command, after preparation and throughput checks, is:
+
+```bash
+bash scripts/run_one_epoch_4gpu.sh
+```
+
+It saves to `outputs/instructs2s-response-gain003-one-epoch/`, with checkpoints
+every 500 updates, JSONL/TensorBoard logging, and final adapter metadata.
+Preparation, smoke, and benchmark logs are under `outputs/reproduction-20261005/`.
+Preparation completed with the previous 100 source shards / 30,133,419,009
+downloaded bytes. Train/dev response-token totals match 2,218,152 / 50,728;
+frame totals match 14,550,100 / 331,900. All 45,000 FLACs exist. The unchanged
+sampler yields 3,750 global updates covering all 44,000 training indices once.
+
+Representative benchmark (first 25 original batches; no evaluation or saving):
+
+| GPUs | Train runtime (s) | Updates/s | Maximum allocated GiB |
+| --- | ---: | ---: | ---: |
+| 1 | 33.8669 | 0.738 | 36.468 |
+| 4 | 17.3120 | 1.444 | 19.921 |
+
+Measured speedup is 1.956x. Compare update timing rather than Trainer's nominal
+samples/second: its fixed per-device batch-size estimate does not describe this
+variable global sampler. Both benchmarks processed 96,250 frames and the same
+target counts. These timings exclude base-model load and include loader startup.
+
+An actual four-GPU FP64 linear-model collective check using the same Qwen
+weighted-loss implementation and distributed normalization matches full-batch
+gradients at relative errors 0 to 2.37e-16 for batch sizes 1, 3 and 11. This
+establishes the normalization rule. It does **not** establish real-model
+numerical parity: a dropout-disabled BF16 Qwen first-batch comparison had
+gradient relative L2 error 2.165 and cosine 0.613 against the original batch.
+Even repeated partitioned Qwen forwards differed by 2.8% in that gradient
+comparison. The recipe is preserved, but exact previous weights or quality are
+not promised on the new multi-GPU execution path. Raw checks are retained in
+`outputs/reproduction-20261005/gradient-parity*.log` and `ddp-loss-check.json`.
+
+The full epoch started in tmux `qwen-epoch-4gpu` at 2026-10-05 04:42:18 UTC.
+A gated postprocessing session waits for exit zero, reloads the final adapter,
+evaluates two fixed train/dev cases plus native probes and clean dev loss,
+and archives the adapter. The full epoch and final evaluation are in progress.
+
 ## 2026-09-30 — native retention, early stopping and fusion diagnosis
 
 Starting code revision `8c319a5`, same cached Qwen2.5-Omni-3B Thinker, TASTE

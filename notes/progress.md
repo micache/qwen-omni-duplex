@@ -1,5 +1,32 @@
 # Progress
 
+## 2026-10-05 — same-recipe epoch reproduction on four A100s (in progress)
+
+The user moved to a fresh machine and requested the completed response-gain
+epoch again, using every GPU for speed. Created a local Python 3.11 environment
+from the pinned requirements and restored the pinned Qwen snapshot plus the
+same MUSAN noise snapshot. InstructS2S preparation retains the original
+four-worker shard order, seed-212 split, and 44,000/1,000 example counts.
+
+`configs/instructs2s_response_gain003_one_epoch_4gpu.yaml` equals the previous
+epoch config except `resume_from_checkpoint: null`: the old step-1,200 recovery
+snapshot does not exist here. Each original 4,000-frame global batch is split
+across four DDP ranks after full-batch augmentation, preserving interruption
+donors and the original optimizer-update budget. Loss uses global event-weight
+normalization; dummy ranks contribute zero targets for small batches. Metrics
+are reduced across ranks and only rank zero writes the adapter and logs.
+
+All 59 local tests pass. The real-model four-GPU smoke completed training and
+evaluation including singleton global batches, audited all 504 LoRA tensors,
+and reloaded its saved adapter. This machine inherits `NCCL_NET=gIB`, which
+fails to initialize; the launcher overrides it with `NCCL_NET=Socket` while
+retaining intra-node GPU communication. Data preparation matches the old
+response-token and frame totals; all 45,000 FLACs exist, and the sampler plans
+3,750 updates with unique example coverage. The first 25 real updates take
+33.8669 s on one GPU versus 17.3120 s on four (1.956x). The main epoch is running
+in tmux `qwen-epoch-4gpu`. Logs are under `outputs/reproduction-20261005/` and
+the configured run folder.
+
 ## 2026-09-30 — diagnosis of one-epoch text errors and all-IDLE inference
 
 Compared the base model, step 1,500, final adapter, adapter-strength ablations
