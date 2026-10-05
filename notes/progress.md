@@ -1,6 +1,15 @@
 # Progress
 
-## 2026-10-05 — same-recipe epoch reproduction on four A100s (in progress)
+## 2026-10-05 — same-recipe epoch reproduced on four A100s
+
+Completed 3,750 updates / epoch 1.0 on all four GPUs in 2,171.34 seconds
+(36.19 minutes including epoch-end validation; excluding model load).
+The final adapter and a checksum-verified 108 MiB archive are under
+`outputs/instructs2s-response-gain003-one-epoch/`. A fresh-process reload passed;
+clean dev text loss is 0.940760 and lexical accuracy 72.51%, versus the previous
+checkpoint's 0.939978 / 72.71%. The four fixed audio cases were nonempty and
+reached STOP, with content/timing errors still present. This is a successful
+checkpoint reproduction, not a solved generalized duplex assistant.
 
 The user moved to a fresh machine and requested the completed response-gain
 epoch again, using every GPU for speed. Created a local Python 3.11 environment
@@ -23,9 +32,13 @@ fails to initialize; the launcher overrides it with `NCCL_NET=Socket` while
 retaining intra-node GPU communication. Data preparation matches the old
 response-token and frame totals; all 45,000 FLACs exist, and the sampler plans
 3,750 updates with unique example coverage. The first 25 real updates take
-33.8669 s on one GPU versus 17.3120 s on four (1.956x). The main epoch is running
-in tmux `qwen-epoch-4gpu`. Logs are under `outputs/reproduction-20261005/` and
-the configured run folder.
+33.8669 s on one GPU versus 17.3120 s on four (1.956x). Final coverage is
+14,550,100 training frames and 44,000 START / 44,000 STOP labels. All 504 LoRA
+tensors are finite; all 504 Adam states are at update 3,750, with four saved
+rank RNG states. Logs and provenance are under `outputs/reproduction-20261005/`
+and the configured run folder. All training/evaluation processes exited zero
+and all GPUs are released. Changes are committed locally; GitHub SSH push is
+blocked by `Permission denied (publickey)` on this fresh machine.
 
 ## 2026-09-30 — diagnosis of one-epoch text errors and all-IDLE inference
 

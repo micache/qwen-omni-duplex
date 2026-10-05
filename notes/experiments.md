@@ -1,6 +1,14 @@
 # Experiments
 
-## 2026-10-05 — four-GPU reproduction setup (in progress)
+## 2026-10-05 — completed four-GPU one-epoch reproduction
+
+The requested fresh rerun completed 3,750 updates / epoch 1.0 with the previous
+recipe, using all four A100s. Training runtime was 2,171.3385 seconds including
+epoch-end validation, excluding model load. Saved final adapter:
+`outputs/instructs2s-response-gain003-one-epoch/final/`. Portable archive:
+`outputs/instructs2s-response-gain003-one-epoch/adapter-response-gain003-one-epoch-4gpu.tar.gz`
+(108 MiB), verified against its adjacent SHA256 file. No weights are committed
+to Git; preserve/download this ignored artifact for the next machine.
 
 Hardware: four NVLink-connected NVIDIA A100-SXM4-40GB GPUs, driver 580.178.04,
 48 CPU threads, 334 GiB RAM. Installed the unchanged `requirements.txt` into
@@ -69,9 +77,40 @@ not promised on the new multi-GPU execution path. Raw checks are retained in
 `outputs/reproduction-20261005/gradient-parity*.log` and `ddp-loss-check.json`.
 
 The full epoch started in tmux `qwen-epoch-4gpu` at 2026-10-05 04:42:18 UTC.
-A gated postprocessing session waits for exit zero, reloads the final adapter,
-evaluates two fixed train/dev cases plus native probes and clean dev loss,
-and archives the adapter. The full epoch and final evaluation are in progress.
+The main job exited zero. Final Trainer state is step 3,750 / epoch 1.0; all
+504 optimizer parameter states are at 3,750. The final adapter contains exactly
+504 finite LoRA tensors / 29,933,568 elements and no base weights. Saved training
+YAML equals the prior recipe except for clearing the missing resume path.
+Training logs cover 14,550,100 frames, 2,003,872 lexical targets, 12,458,228 IDLE
+labels, and 44,000 START / 44,000 STOP labels. The weighted target-count mean
+training loss is 0.626095; the final window text loss is 0.943934. Augmented dev
+text loss is 0.947198; augmented batch-mean weighted loss is 0.554336.
+
+Gated fresh-process postprocessing also exited zero. Its complete 1,000-example
+clean dev pass has 50,728 lexical targets, 279,172 IDLE labels and 1,000
+START/STOP pairs. Comparison against the previous saved response-gain epoch:
+
+| Clean dev metric | Previous epoch | Four-GPU reproduction |
+| --- | ---: | ---: |
+| Text loss | 0.939978 | 0.940760 |
+| Weighted loss | 0.567940 | 0.568917 |
+| Lexical token accuracy | 72.71% | 72.51% |
+
+The first two train / two dev questions produce nonempty responses and STOP
+without timeouts. None exactly matches its full reference; dev case zero starts
+twice and repeats its opening clause, and the philosopher example misassigns
+positions. These remain timing/content limitations. The 12 native-text probes
+retain their expected answers by meaning on inspection; strict prefix matching
+is 8/12 because several numeric answers are spelled out or introduced with
+words. Do not infer broad knowledge retention or generalized duplex quality.
+
+Full report/traces: `outputs/instructs2s-response-gain003-one-epoch/reload-evaluation/`.
+Integrity/coverage report: `completion-report.json` in that run root. Config,
+manifest and noise hashes plus package versions are recorded in
+`outputs/reproduction-20261005/run-provenance.json`. The archive checksum passed,
+all GPUs are idle after cleanup, and 59 local tests passed. GitHub SSH push is
+blocked by this machine's missing authorized key (`Permission denied (publickey)`);
+repository changes are committed locally.
 
 ## 2026-09-30 — native retention, early stopping and fusion diagnosis
 
