@@ -178,7 +178,7 @@ class QwenDuplexThinker(nn.Module):
         from pathlib import Path
         import numpy as np
         import soundfile as sf
-        from .dataset import resample_waveform_to_16khz
+        from .audio import resample_waveform_to_16khz
         from .streaming import DuplexGenerationResult, QwenDuplexStreamer
 
         if max_new_tokens is None:

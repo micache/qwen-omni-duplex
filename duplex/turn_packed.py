@@ -18,11 +18,8 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import torch
-from torch.utils.data import Dataset
 
-from .conversations import exact_audio_frame_count
-from .dataset import TARGET_SAMPLE_RATE_HZ, resample_waveform_to_16khz
+from .audio import TARGET_SAMPLE_RATE_HZ, exact_audio_frame_count, resample_waveform_to_16khz
 from .timeline import (
     ControlTokenIds,
     EventKind,
@@ -33,16 +30,9 @@ from .timeline import (
     TargetEventSequence,
     WindowTimeline,
     _decode,
-    _encode_utterance,
+    _validate_token_ids,
     encode_causal_timeline,
 )
-
-
-DATASET_VIEW = "TASTE-IF-SFT-48K"
-DATASET_ID = "Jaylin0418/TASTE-IF-SFT-48K"
-DATASET_REVISION = "main"
-NOISE_DATASET_ID = "corypaik/musan"
-NOISE_CONFIG = "noise"
 
 
 @dataclass(frozen=True)
@@ -104,74 +94,6 @@ def decode_audio(value: object, *, field: str) -> np.ndarray:
     return resample_waveform_to_16khz(mono, int(sample_rate))
 
 
-def conversation_from_row(row: Mapping[str, object]) -> PackedConversation:
-    """Validate one default-config TASTE row without using timestamp alignment."""
-
-    conversation_id = row.get("idx")
-    messages = row.get("message")
-    if not isinstance(conversation_id, str) or not conversation_id:
-        raise ValueError("TASTE row has no non-empty idx.")
-    if not isinstance(messages, Sequence) or isinstance(messages, (str, bytes)):
-        raise ValueError(f"{conversation_id}: message must be a two-turn sequence.")
-    if len(messages) != 2 or not all(isinstance(item, Mapping) for item in messages):
-        raise ValueError(f"{conversation_id}: expected exactly user and assistant turns.")
-    user, assistant = messages
-    if user.get("role") != "user" or assistant.get("role") != "assistant":
-        raise ValueError(f"{conversation_id}: expected user then assistant roles.")
-    assistant_text = assistant.get("text")
-    if not isinstance(assistant_text, str) or not assistant_text.strip():
-        raise ValueError(f"{conversation_id}: assistant text is empty.")
-    user_waveform = decode_audio(row.get("instruction_audio"), field="instruction_audio")
-    assistant_waveform = decode_audio(row.get("response_audio"), field="response_audio")
-    return PackedConversation(
-        conversation_id=conversation_id,
-        user_waveform=user_waveform,
-        assistant_samples=len(assistant_waveform),
-        assistant_text=assistant_text,
-    )
-
-
-class TasteConversationDataset(Dataset):
-    """Lazy local-Parquet view; every index is one complete conversation."""
-
-    def __init__(self, dataset: object) -> None:
-        self.dataset = dataset
-
-    def __len__(self) -> int:
-        return len(self.dataset)  # type: ignore[arg-type]
-
-    def __getitem__(self, index: int) -> PackedConversation:
-        return conversation_from_row(self.dataset[index])  # type: ignore[index]
-
-
-def load_local_taste(
-    root: str | Path,
-    *,
-    split: str,
-    max_samples: int | None = None,
-) -> TasteConversationDataset:
-    """Open the downloaded default config without contacting the Hub."""
-
-    from datasets import load_dataset
-
-    root = Path(root)
-    pattern = "shuffled_dev.parquet" if split == "dev" else "shuffled_train_part_*.parquet"
-    files = sorted((root / "data").glob(pattern))
-    if not files:
-        raise FileNotFoundError(f"No TASTE {split} Parquet files under {root / 'data'}.")
-    dataset = load_dataset(
-        "parquet",
-        data_files={split: [str(path) for path in files]},
-        split=split,
-        cache_dir=str(root / ".datasets_cache"),
-    )
-    if max_samples is not None:
-        if max_samples < 1:
-            raise ValueError("max_samples must be positive when supplied.")
-        dataset = dataset.select(range(min(max_samples, len(dataset))))
-    return TasteConversationDataset(dataset)
-
-
 def build_turn_packed_timeline(
     conversation: PackedConversation,
     *,
@@ -184,7 +106,9 @@ def build_turn_packed_timeline(
 
     if valid_frame_count < 3:
         raise ValueError(f"{conversation.conversation_id}: fewer than three audio frames.")
-    token_ids, _ = _encode_utterance(tokenizer, conversation.assistant_text)
+    token_ids = _validate_token_ids(list(tokenizer.encode(
+        conversation.assistant_text, add_special_tokens=False
+    )))
     decoded = _decode(tokenizer, token_ids)
     if decoded != conversation.assistant_text:
         raise ValueError(
@@ -254,7 +178,6 @@ def build_turn_packed_timeline(
         window_end_seconds=duration,
         frame_rate_hz=25,
         user_waveform=conversation.input_waveform,
-        utterances=(),
         frames=tuple(frames),
         targets=targets,
         causal=causal,
@@ -433,7 +356,6 @@ class TurnPackedCollator:
             control_tokens=control_tokens,
             thinker_bos_token_id=thinker_bos_token_id,
             frame_rate_hz=25,
-            interruption_probability=0.0,
             augmentation_seed=augmentation_seed,
             context_token_ids=context_token_ids,
         )
@@ -505,8 +427,7 @@ class TurnPackedCollator:
                 )
             timelines[index] = timeline
 
-        # The established collator owns extractor masks, padding, and the exact
-        # model-input schema.  Its interruption probability is fixed at zero.
+        # Tensor collation owns extractor masks, padding, and model inputs.
         batch = self.base(timelines)
         batch["audio_cache_keys"] = tuple(
             hashlib.sha256(

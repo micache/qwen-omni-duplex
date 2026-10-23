@@ -1263,3 +1263,19 @@ substitutions. All 62 tests pass. Native smooth TOR 115/119; interruption TOR
 text proxy rows against published PersonaPlex, Moshi and Freeze-Omni scores.
 Relevance is unmeasured because no API key is configured. Full protocol, counts,
 numerical limits and artifact paths: `notes/full_duplex_bench_v1.md`.
+# 2026-10-23 — Presentation code cleanup
+
+Reduced the code to the InstructS2S dataset, packed event timelines and
+augmentation, Thinker model, LoRA training, batching, and streaming generation.
+Removed preparation/download utilities, session and overfit runners, obsolete
+DailyTalk/TASTE dataset branches, and benchmark/evaluation machinery. Renamed
+the trainer to `DuplexTrainer` and moved shared audio math to `duplex/audio.py`.
+The single recipe is `configs/turn_packed_main.yaml`, using the completed
+InstructS2S response-gain settings with no automatic checkpoint resume.
+README files, demo assets, historical experiment notes, and local data/weights
+are preserved; the README's saved-trace replay command remains available.
+No training, benchmark rerun, or model/data download is part of this cleanup.
+Historical reproduction scripts remain available in Git history.
+Validation: 26 local correctness tests pass; all 12 core modules import and
+compile, the main recipe validates, and both saved demo traces pass replay
+validation (463 counting frames and 386 countryside frames).

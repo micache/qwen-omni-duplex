@@ -1,4 +1,4 @@
-"""Narrow research scaffold for Qwen2.5-Omni Thinker duplex experiments."""
+"""Qwen2.5-Omni Thinker with a fixed audio/text/control event timeline."""
 
 from .timeline import EventKind, TimelineSpec
 

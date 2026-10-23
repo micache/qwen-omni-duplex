@@ -1,6 +1,6 @@
 --extra-index-url https://download.pytorch.org/whl/cu126
 
-# Session 06 probe: Qwen/Qwen2.5-Omni-3B at
+# Validated Qwen/Qwen2.5-Omni-3B environment at
 # f75b40e3da2003cdd6e1829b1f420ca70797c34e.
 torch==2.10.0+cu126
 torchvision==0.25.0+cu126
@@ -18,11 +18,3 @@ pytest==9.1.1
 tensorboard==2.20.0
 # TensorBoard 2.20 imports pkg_resources, removed in setuptools 82.
 setuptools==80.9.0
-# Pinned VoiceBench instruction-following evaluator dependencies.
-absl-py==2.5.0
-immutabledict==4.3.1
-langdetect==1.0.9
-loguru==0.7.3
-nltk==3.10.3
-# Optional explicit Full-Duplex-Bench v1 Google Drive download.
-gdown==6.4.1

@@ -1054,3 +1054,13 @@ README comparator values are the pinned/current upstream published table,
 not reruns. Detailed counts, exact values and commands:
 `notes/full_duplex_bench_v1.md`; local results:
 `outputs/full-duplex-bench-v1-response-gain003/`.
+# 2026-10-23 — Implementation consolidation for presentation
+
+Code cleanup only; no new experiment results. Training now accepts only
+`InstructS2SFirstTurn`, following the user's current dataset choice. The main
+recipe retains response audio gain 0.03, synthetic interruption, MUSAN noise,
+weighted next-event loss, frozen FP32 audio encoding, and empty text context.
+Session-specific diagnostics, historical data preparation and benchmark runners
+have been removed from the working tree. Earlier commands in these notes are
+historical; their source is recoverable from Git history. The README and its
+reported results are unchanged.
